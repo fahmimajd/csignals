@@ -43,8 +43,19 @@ class CryptoSignalApp:
         self.telegram_notifier = TelegramNotifier()
         self.client_manager = BinanceClientManager()
         self.hold_calculator = HoldDurationCalculator()
+        
+        # CRITICAL FIX: Per-symbol locks to prevent race conditions
+        self._symbol_locks: Dict[str, asyncio.Lock] = {}
+        self._global_lock = asyncio.Lock()
+        
         # Track active signals for hold duration monitoring
         self.active_signals: Dict[int, Dict] = {}
+
+    def _get_symbol_lock(self, symbol: str) -> asyncio.Lock:
+        """Get or create a lock for a specific symbol."""
+        if symbol not in self._symbol_locks:
+            self._symbol_locks[symbol] = asyncio.Lock()
+        return self._symbol_locks[symbol]
 
     async def initialize(self):
         """Initialize all modules and connections."""
@@ -152,131 +163,132 @@ class CryptoSignalApp:
                 # Update aggregator
                 await self._update_aggregator(symbol_data)
 
-                # Process signals for each symbol
+                # Process signals for each symbol (with per-symbol locking to prevent race conditions)
                 signals = {}
                 for symbol in config.SYMBOLS:
-                    signal_type, score_100, raw_score, details, emoji = self.aggregator.get_signal(symbol)
-                    signals[symbol] = {
-                        'signal': signal_type,
-                        'score_100': score_100,
-                        'raw_score': raw_score,
-                        'details': details,
-                        'emoji': emoji
-                    }
+                    async with self._get_symbol_lock(symbol):
+                        signal_type, score_100, raw_score, details, emoji = self.aggregator.get_signal(symbol)
+                        signals[symbol] = {
+                            'signal': signal_type,
+                            'score_100': score_100,
+                            'raw_score': raw_score,
+                            'details': details,
+                            'emoji': emoji
+                        }
 
-                    # Check confirmation status
-                    is_confirmed, confirmed_signal, confirmed_score = \
-                        self.confirmation.update(symbol, raw_score)
+                        # Check confirmation status
+                        is_confirmed, confirmed_signal, confirmed_score = \
+                            self.confirmation.update(symbol, raw_score)
 
-                    signals[symbol]['is_confirmed'] = is_confirmed
-                    signals[symbol]['confirmed_signal'] = confirmed_signal
+                        signals[symbol]['is_confirmed'] = is_confirmed
+                        signals[symbol]['confirmed_signal'] = confirmed_signal
 
-                    progress, total = self.confirmation.get_confirmation_progress(symbol)
-                    signals[symbol]['confirmation_progress'] = progress
-                    signals[symbol]['confirmation_total'] = total
+                        progress, total = self.confirmation.get_confirmation_progress(symbol)
+                        signals[symbol]['confirmation_progress'] = progress
+                        signals[symbol]['confirmation_total'] = total
 
-                    # Process confirmed strong signals
-                    if is_confirmed and confirmed_signal in ['STRONG_LONG', 'STRONG_SHORT']:
-                        tp_sl_info = await self._calculate_tp_sl(
-                            symbol, confirmed_signal, symbol_data.get(symbol, {})
-                        )
+                        # Process confirmed strong signals
+                        if is_confirmed and confirmed_signal in ['STRONG_LONG', 'STRONG_SHORT']:
+                            tp_sl_info = await self._calculate_tp_sl(
+                                symbol, confirmed_signal, symbol_data.get(symbol, {})
+                            )
 
-                        signals[symbol]['tp_sl'] = tp_sl_info
+                            signals[symbol]['tp_sl'] = tp_sl_info
 
-                        # Check R:R ratio
-                        rr_value = self._extract_rr_value(tp_sl_info)
+                            # Check R:R ratio
+                            rr_value = self._extract_rr_value(tp_sl_info)
 
-                        if rr_value >= config.MIN_RR_RATIO:
-                            price = symbol_data.get(symbol, {}).get('openinterest', {}).get('price', 0)
-                            if price > 0:
-                                signal_data = {
-                                    'signal_type': confirmed_signal,
-                                    'score': confirmed_score,
-                                    'entry_price': price,
-                                    'stop_loss': tp_sl_info.get('stop_loss', 0),
-                                    'take_profit': tp_sl_info.get('take_profit', 0),
-                                    'atr_value': tp_sl_info.get('atr', 0),
-                                    'rr_ratio': rr_value,
-                                    'tp_source': tp_sl_info.get('tp_source', 'ATR'),
-                                    'trail_start': tp_sl_info.get('trail_start', 0),
-                                    'trail_stop': tp_sl_info.get('trail_stop', 0),
-                                    'confirmed_at': datetime.now()
-                                }
-
-                                # Calculate hold duration
-                                oi_data = symbol_data.get(symbol, {}).get('openinterest', {})
-                                whale_data = symbol_data.get(symbol, {}).get('whale', {})
-
-                                hold_result = self.hold_calculator.calculate(
-                                    atr_value=tp_sl_info.get('atr', 0),
-                                    entry_price=price,
-                                    raw_score=confirmed_score,
-                                    taker_buy_ratio=oi_data.get('taker_ratio', 0.5),
-                                    oi_change_pct=oi_data.get('change', 0),
-                                    whale_trade_count=whale_data.get('buyers', 0) + whale_data.get('sellers', 0)
-                                )
-
-                                # Calculate deadline
-                                hold_deadline = datetime.now() + timedelta(hours=hold_result['hold_hours'])
-
-                                # Format hold_duration for telegram
-                                hold_duration_tg = {
-                                    'formatted_duration': self.hold_calculator.format_duration(hold_result['hold_hours']),
-                                    'deadline_str': hold_deadline.strftime('%H:%M WIB'),
-                                    'formula_str': hold_result['formula_str'],
-                                    'atr_factor': hold_result['atr_factor'],
-                                    'score_factor': hold_result['score_factor'],
-                                    'volume_factor': hold_result['volume_factor']
-                                }
-
-                                # === SEND TELEGRAM FIRST (most important) ===
-                                try:
-                                    await self.telegram_notifier.send_signal_alert(
-                                        symbol, confirmed_signal,
-                                        self.aggregator.raw_to_100(confirmed_score),
-                                        confirmed_score,
-                                        details, tp_sl_info, hold_duration_tg
-                                    )
-                                except Exception as tg_err:
-                                    logger.error(f"Telegram send failed for {symbol}: {tg_err}")
-
-                                # === THEN SAVE TO DB (non-critical, wrap each in try/except) ===
-                                signal_id = None
-                                try:
-                                    signal_id = await self.database.save_signal(symbol, signal_data)
-                                    logger.info(f"Signal saved to DB: {symbol} {confirmed_signal} (ID: {signal_id})")
-                                except Exception as db_err:
-                                    logger.error(f"Failed to save signal to DB for {symbol}: {db_err}")
-
-                                if signal_id:
-                                    try:
-                                        await self.database.save_hold_duration(
-                                            signal_id=signal_id,
-                                            hold_hours=hold_result['hold_hours'],
-                                            hold_deadline=hold_deadline,
-                                            atr_factor=hold_result['atr_factor'],
-                                            score_factor=hold_result['score_factor'],
-                                            volume_factor=hold_result['volume_factor'],
-                                            volume_score=hold_result['volume_score']
-                                        )
-                                    except Exception as db_err:
-                                        logger.error(f"Failed to save hold duration for signal {signal_id}: {db_err}")
-
-                                    # Track active signal (in-memory, no DB dependency)
-                                    self.active_signals[signal_id] = {
-                                        'symbol': symbol,
+                            if rr_value >= config.MIN_RR_RATIO:
+                                price = symbol_data.get(symbol, {}).get('openinterest', {}).get('price', 0)
+                                if price > 0:
+                                    signal_data = {
                                         'signal_type': confirmed_signal,
-                                        'score_100': self.aggregator.raw_to_100(confirmed_score),
-                                        'raw_score': confirmed_score,
+                                        'score': confirmed_score,
                                         'entry_price': price,
-                                        'hold_hours': hold_result['hold_hours'],
-                                        'hold_deadline': hold_deadline,
-                                        'extended': False,
+                                        'stop_loss': tp_sl_info.get('stop_loss', 0),
+                                        'take_profit': tp_sl_info.get('take_profit', 0),
                                         'atr_value': tp_sl_info.get('atr', 0),
-                                        'details': details,
-                                        'tp_sl': tp_sl_info,
-                                        'hold_result': hold_result
+                                        'rr_ratio': rr_value,
+                                        'tp_source': tp_sl_info.get('tp_source', 'ATR'),
+                                        'trail_start': tp_sl_info.get('trail_start', 0),
+                                        'trail_stop': tp_sl_info.get('trail_stop', 0),
+                                        'confirmed_at': datetime.now()
                                     }
+
+                                    # Calculate hold duration
+                                    oi_data = symbol_data.get(symbol, {}).get('openinterest', {})
+                                    whale_data = symbol_data.get(symbol, {}).get('whale', {})
+
+                                    hold_result = self.hold_calculator.calculate(
+                                        atr_value=tp_sl_info.get('atr', 0),
+                                        entry_price=price,
+                                        raw_score=confirmed_score,
+                                        taker_buy_ratio=oi_data.get('taker_ratio', 0.5),
+                                        oi_change_pct=oi_data.get('change', 0),
+                                        whale_trade_count=whale_data.get('buyers', 0) + whale_data.get('sellers', 0)
+                                    )
+
+                                    # Calculate deadline
+                                    hold_deadline = datetime.now() + timedelta(hours=hold_result['hold_hours'])
+
+                                    # Format hold_duration for telegram
+                                    hold_duration_tg = {
+                                        'formatted_duration': self.hold_calculator.format_duration(hold_result['hold_hours']),
+                                        'deadline_str': hold_deadline.strftime('%H:%M WIB'),
+                                        'formula_str': hold_result['formula_str'],
+                                        'atr_factor': hold_result['atr_factor'],
+                                        'score_factor': hold_result['score_factor'],
+                                        'volume_factor': hold_result['volume_factor']
+                                    }
+
+                                    # === SEND TELEGRAM FIRST (most important) ===
+                                    try:
+                                        await self.telegram_notifier.send_signal_alert(
+                                            symbol, confirmed_signal,
+                                            self.aggregator.raw_to_100(confirmed_score),
+                                            confirmed_score,
+                                            details, tp_sl_info, hold_duration_tg
+                                        )
+                                    except Exception as tg_err:
+                                        logger.error(f"Telegram send failed for {symbol}: {tg_err}")
+
+                                    # === THEN SAVE TO DB (non-critical, wrap each in try/except) ===
+                                    signal_id = None
+                                    try:
+                                        signal_id = await self.database.save_signal(symbol, signal_data)
+                                        logger.info(f"Signal saved to DB: {symbol} {confirmed_signal} (ID: {signal_id})")
+                                    except Exception as db_err:
+                                        logger.error(f"Failed to save signal to DB for {symbol}: {db_err}")
+
+                                    if signal_id:
+                                        try:
+                                            await self.database.save_hold_duration(
+                                                signal_id=signal_id,
+                                                hold_hours=hold_result['hold_hours'],
+                                                hold_deadline=hold_deadline,
+                                                atr_factor=hold_result['atr_factor'],
+                                                score_factor=hold_result['score_factor'],
+                                                volume_factor=hold_result['volume_factor'],
+                                                volume_score=hold_result['volume_score']
+                                            )
+                                        except Exception as db_err:
+                                            logger.error(f"Failed to save hold duration for signal {signal_id}: {db_err}")
+
+                                        # Track active signal (in-memory, no DB dependency)
+                                        self.active_signals[signal_id] = {
+                                            'symbol': symbol,
+                                            'signal_type': confirmed_signal,
+                                            'score_100': self.aggregator.raw_to_100(confirmed_score),
+                                            'raw_score': confirmed_score,
+                                            'entry_price': price,
+                                            'hold_hours': hold_result['hold_hours'],
+                                            'hold_deadline': hold_deadline,
+                                            'extended': False,
+                                            'atr_value': tp_sl_info.get('atr', 0),
+                                            'details': details,
+                                            'tp_sl': tp_sl_info,
+                                            'hold_result': hold_result
+                                        }
                         else:
                             logger.info(
                                 f"Signal skipped for {symbol}: "

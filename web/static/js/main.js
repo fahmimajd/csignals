@@ -487,6 +487,7 @@ const App = {
         await this.loadDashboard();
         this.startClock();
         this.startAutoRefresh();
+        this.startPriceWebSocket();
 
         this.toast.show('Dashboard initialized', 'success');
     },
@@ -533,20 +534,24 @@ const App = {
 
         const tbody = document.querySelector('#active-signals-table tbody');
         if (this.activeSignals.length === 0) {
-            tbody.innerHTML = '<tr class="loading-row"><td colspan="10">No active signals</td></tr>';
+            tbody.innerHTML = '<tr class="loading-row"><td colspan="11">No active signals</td></tr>';
         } else {
             tbody.innerHTML = this.activeSignals.map(s => {
                 const sJson = JSON.stringify(s).replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+                const currentPrice = s.current_price ? Utils.fmtPrice(s.current_price) : '--';
+                const unrealizedPnl = s.unrealized_pnl != null ? Utils.fmtPct(s.unrealized_pnl) : '--';
+                
                 return `
             <tr>
                 <td>${s.symbol}</td>
                 <td class="${Utils.signalClass(s.signal_type)}">${Utils.signalLabel(s.signal_type)}</td>
                 <td>${s.score || '--'}</td>
                 <td>${Utils.fmtPrice(s.entry_price)}</td>
+                <td class="current-price-cell" data-symbol="${s.symbol}">${currentPrice}</td>
+                <td class="unrealized-pnl-cell" data-symbol="${s.symbol}">${unrealizedPnl}</td>
                 <td>${Utils.fmtPrice(s.stop_loss)}</td>
                 <td>${Utils.fmtPrice(s.take_profit)}</td>
                 <td>${s.rr_ratio || '--'}</td>
-                <td>${s.hold_hours ? s.hold_hours + 'h' : '--'}</td>
                 <td>${Utils.fmtCountdown(s.hold_deadline)}</td>
                 <td><button class="action-btn" onclick='App.modal.show(JSON.parse(this.dataset.signal))' data-signal="${sJson}"><i class="fas fa-eye"></i></button></td>
             </tr>`;
@@ -609,6 +614,121 @@ const App = {
     startAutoRefresh() {
         // Refresh dashboard every 30 seconds
         setInterval(() => this.loadDashboard(), 30000);
+    },
+
+    /**
+     * WebSocket-based real-time price updates for active signals
+     * Connects to Binance Futures WebSocket stream for live price feeds
+     */
+    async startPriceWebSocket() {
+        // Wait for initial active signals to load
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        if (!this.activeSignals || this.activeSignals.length === 0) {
+            // Retry after 5 seconds if no active signals yet
+            setTimeout(() => this.startPriceWebSocket(), 5000);
+            return;
+        }
+
+        const symbols = [...new Set(this.activeSignals.map(s => s.symbol.toLowerCase()))];
+        if (symbols.length === 0) return;
+
+        // Create WebSocket streams for each symbol (using mini ticker for efficiency)
+        const streams = symbols.map(s => `${s}@miniTicker`);
+        const wsUrl = `wss://fstream.binance.com/stream?streams=${streams.join('/')}`;
+        
+        console.log('[WebSocket] Connecting to:', wsUrl);
+        
+        let ws = null;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 10;
+        
+        const connect = () => {
+            try {
+                ws = new WebSocket(wsUrl);
+                
+                ws.onopen = () => {
+                    console.log('[WebSocket] Connected');
+                    reconnectAttempts = 0;
+                    this.setConnectionStatus(true);
+                };
+                
+                ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (!data.data) return;
+                        
+                        const symbol = data.data.s; // e.g., "BTCUSDT"
+                        const price = parseFloat(data.data.c); // current price
+                        
+                        // Update all cells with matching symbol
+                        const priceCells = document.querySelectorAll(`.current-price-cell[data-symbol="${symbol}"]`);
+                        const pnlCells = document.querySelectorAll(`.unrealized-pnl-cell[data-symbol="${symbol}"]`);
+                        
+                        if (priceCells.length > 0) {
+                            priceCells.forEach(cell => {
+                                cell.textContent = Utils.fmtPrice(price);
+                                cell.classList.add('price-updated');
+                                setTimeout(() => cell.classList.remove('price-updated'), 300);
+                            });
+                            
+                            // Calculate and update PnL for each row
+                            pnlCells.forEach(cell => {
+                                const row = cell.closest('tr');
+                                const entryCell = row.querySelector('td:nth-child(4)'); // Entry price column
+                                const signalTypeCell = row.querySelector('td:nth-child(2)'); // Signal type column
+                                
+                                if (entryCell && signalTypeCell) {
+                                    const entryPrice = parseFloat(entryCell.textContent.replace(/,/g, ''));
+                                    const signalType = signalTypeCell.textContent.toUpperCase();
+                                    
+                                    if (!isNaN(entryPrice)) {
+                                        let pnlPct;
+                                        if (signalType.includes('LONG')) {
+                                            pnlPct = ((price - entryPrice) / entryPrice) * 100;
+                                        } else if (signalType.includes('SHORT')) {
+                                            pnlPct = ((entryPrice - price) / entryPrice) * 100;
+                                        } else {
+                                            pnlPct = 0;
+                                        }
+                                        
+                                        cell.innerHTML = Utils.fmtPct(pnlPct);
+                                    }
+                                }
+                            });
+                        }
+                    } catch (err) {
+                        console.error('[WebSocket] Error parsing message:', err);
+                    }
+                };
+                
+                ws.onerror = (error) => {
+                    console.error('[WebSocket] Error:', error);
+                    this.setConnectionStatus(false);
+                };
+                
+                ws.onclose = () => {
+                    console.log('[WebSocket] Disconnected');
+                    this.setConnectionStatus(false);
+                    
+                    // Auto-reconnect with exponential backoff
+                    if (reconnectAttempts < maxReconnectAttempts) {
+                        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+                        console.log(`[WebSocket] Reconnecting in ${delay}ms (attempt ${reconnectAttempts + 1}/${maxReconnectAttempts})`);
+                        reconnectAttempts++;
+                        setTimeout(connect, delay);
+                    } else {
+                        console.error('[WebSocket] Max reconnection attempts reached');
+                    }
+                };
+                
+            } catch (err) {
+                console.error('[WebSocket] Failed to create connection:', err);
+                this.setConnectionStatus(false);
+            }
+        };
+        
+        connect();
     }
 };
 

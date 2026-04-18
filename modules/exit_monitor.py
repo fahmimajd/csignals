@@ -60,6 +60,42 @@ class ExitMonitor:
         self.telegram = telegram_notifier
         self._running = False
         self._check_interval = 60  # cek setiap 60 detik
+        self._max_retries = 3  # Maximum retries for price fetch
+
+    async def _fetch_price_with_retry(self, symbol: str, max_retries: int = None) -> Optional[float]:
+        """
+        Fetch price with exponential backoff retry logic.
+        
+        Args:
+            symbol: Trading pair symbol
+            max_retries: Override default max retries
+            
+        Returns:
+            Current price or None if all retries failed
+        """
+        if max_retries is None:
+            max_retries = self._max_retries
+            
+        for attempt in range(max_retries):
+            try:
+                price = await self.price_fetcher(symbol)
+                if price and price > 0:
+                    return price
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    logger.error(
+                        f"[EXIT] Price fetch failed after {max_retries} attempts for {symbol}: {e}"
+                    )
+                    return None
+                # Exponential backoff: 1s, 2s, 4s...
+                wait_time = 2 ** attempt
+                logger.warning(
+                    f"[EXIT] Price fetch attempt {attempt + 1}/{max_retries} failed for {symbol}, "
+                    f"retrying in {wait_time}s: {e}"
+                )
+                await asyncio.sleep(wait_time)
+        
+        return None
 
     async def run(self):
         """
@@ -154,14 +190,10 @@ class ExitMonitor:
         deadline = signal.get('hold_deadline')
         is_long = 'LONG' in signal_type
 
-        # ── Ambil harga terkini ──
-        try:
-            current_price = await self.price_fetcher(symbol)
-        except Exception as e:
-            logger.warning(f"[EXIT] Gagal ambil harga {symbol}: {e}")
-            return
-
-        if current_price <= 0:
+        # ── Ambil harga terkini dengan retry logic ──
+        current_price = await self._fetch_price_with_retry(symbol)
+        if current_price is None or current_price <= 0:
+            logger.warning(f"[EXIT] Invalid price for {symbol}: {current_price}")
             return
 
         # ── Cek Take Profit ──

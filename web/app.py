@@ -7,6 +7,7 @@ import logging
 import sys
 import os
 from decimal import Decimal
+from typing import Optional
 
 # Add the parent directory to sys.path to import modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -17,8 +18,21 @@ import config
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'cyberpunk_signal_monitor_2026'
 
+# CRITICAL FIX: Singleton database pool to prevent connection exhaustion
+_db_instance: Optional[Database] = None
+_db_lock = threading.Lock()
+
+def get_database() -> Database:
+    """Get or create singleton database instance."""
+    global _db_instance
+    if _db_instance is None:
+        with _db_lock:
+            if _db_instance is None:
+                _db_instance = Database()
+    return _db_instance
+
 # Initialize database
-db = Database()
+db = get_database()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -109,9 +123,50 @@ def get_signals():
 
 @app.route('/api/signals/active')
 def get_active_signals():
-    """Get all active signals"""
+    """Get all active signals with current prices"""
     try:
         signals = _run_async(db.get_active_signals())
+        
+        # Fetch current prices from Binance for active symbols
+        active_symbols = list(set(s['symbol'] for s in signals))
+        current_prices = {}
+        
+        if active_symbols:
+            try:
+                import requests
+                # Use Binance Futures API to get current prices
+                binance_url = "https://fapi.binance.com/fapi/v1/ticker/price"
+                response = requests.get(binance_url, timeout=5)
+                if response.status_code == 200:
+                    all_prices = response.json()
+                    # Map symbol -> price
+                    current_prices = {p['symbol']: float(p['price']) for p in all_prices 
+                                     if p['symbol'] in active_symbols}
+            except Exception as price_err:
+                logger.warning(f"Could not fetch current prices: {price_err}")
+        
+        # Add current_price to each signal
+        for signal in signals:
+            symbol = signal['symbol']
+            signal['current_price'] = current_prices.get(symbol, None)
+            
+            # Calculate unrealized PnL if current price available
+            if signal['current_price'] and signal.get('entry_price'):
+                entry = float(signal['entry_price'])
+                current = float(signal['current_price'])
+                signal_type = signal.get('signal_type', '').upper()
+                
+                if 'LONG' in signal_type:
+                    pnl_pct = ((current - entry) / entry) * 100
+                elif 'SHORT' in signal_type:
+                    pnl_pct = ((entry - current) / entry) * 100
+                else:
+                    pnl_pct = 0
+                
+                signal['unrealized_pnl'] = round(pnl_pct, 2)
+            else:
+                signal['unrealized_pnl'] = None
+        
         return jsonify({
             'success': True,
             'data': _serialize(signals),
