@@ -290,10 +290,19 @@ class CryptoSignalApp:
                                             'hold_result': hold_result
                                         }
                         else:
-                            logger.info(
-                                f"Signal skipped for {symbol}: "
-                                f"R:R ratio {rr_value:.2f} below minimum {config.MIN_RR_RATIO}"
-                            )
+                            if not is_confirmed:
+                                logger.debug(f"Signal skipped for {symbol}: not yet confirmed")
+                            elif confirmed_signal not in ['STRONG_LONG', 'STRONG_SHORT']:
+                                logger.debug(f"Signal skipped for {symbol}: signal={confirmed_signal}, not strong")
+                            else:
+                                # R:R ratio below minimum — extract it safely
+                                rr_v = self._extract_rr_value(
+                                    signals[symbol].get('tp_sl', {}) if 'tp_sl' in signals[symbol] else {}
+                                )
+                                logger.info(
+                                    f"Signal skipped for {symbol}: "
+                                    f"R:R ratio {rr_v:.2f} below minimum {config.MIN_RR_RATIO}"
+                                )
 
                 # Prepare and update display
                 display_data = self._prepare_display_data(symbol_data, signals)
@@ -638,6 +647,12 @@ class CryptoSignalApp:
                 await self.database.close()
             except Exception as e:
                 logger.warning(f"Error closing database: {e}")
+
+            # Close Telegram bot session
+            try:
+                await self.telegram_notifier.close()
+            except Exception as e:
+                logger.warning(f"Error closing Telegram: {e}")
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
 

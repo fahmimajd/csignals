@@ -73,13 +73,19 @@ class LiquidationMonitor(Monitor):
 
                     while self.running:
                         try:
-                            # recv() with timeout to detect dead connections
                             msg = await asyncio.wait_for(
                                 ws.recv(),
                                 timeout=WEBSOCKET_RECV_TIMEOUT
                             )
                             if msg and 'data' in msg:
                                 await self._process_liquidation(msg['data'])
+
+                        except BinanceWebsocketQueueOverflow:
+                            # Queue overflow from ws.recv() — break inner loop to reconnect
+                            logger.warning(
+                                f"Liquidation batch WebSocket queue overflow (from recv), reconnecting..."
+                            )
+                            break
 
                         except asyncio.TimeoutError:
                             # No message received within timeout — connection may be dead
@@ -88,15 +94,21 @@ class LiquidationMonitor(Monitor):
                             )
                             break  # Exit inner loop to reconnect
 
-                        except BinanceWebsocketQueueOverflow:
-                            # Queue overflow — reconnect WITHOUT resetting the shared manager.
-                            # The batch design keeps the total stream count manageable.
+                        except BinanceWebsocketUnableToConnect:
                             logger.warning(
-                                f"Liquidation batch WebSocket queue overflow, reconnecting..."
+                                f"Liquidation batch WebSocket unable to connect, reconnecting..."
                             )
-                            break  # Exit inner loop to reconnect
+                            break
 
             except asyncio.CancelledError:
+                break
+
+            except BinanceWebsocketQueueOverflow:
+                # Queue overflow from ws.recv() or __aenter__ — break inner loop to reconnect
+                # Self-correcting: reset attempt so we don't count it against MAX_CONSECUTIVE_ERRORS
+                logger.warning(
+                    f"Liquidation batch WebSocket queue overflow (outer), reconnecting..."
+                )
                 break
 
             except BinanceWebsocketUnableToConnect:
@@ -107,16 +119,10 @@ class LiquidationMonitor(Monitor):
                     f"(attempt {attempt}), retrying in {delay:.1f}s..."
                 )
 
-            except BinanceWebsocketQueueOverflow:
-                # Caught here as a safety net in case the inner loop catch is bypassed
-                attempt += 1
-                delay = self._calculate_backoff(attempt)
-                logger.warning(
-                    f"Liquidation batch WebSocket queue overflow "
-                    f"(attempt {attempt}), retrying in {delay:.1f}s..."
-                )
-
             except Exception as e:
+                if isinstance(e, BinanceWebsocketQueueOverflow):
+                    # Already handled above but double-check
+                    break
                 attempt += 1
                 delay = self._calculate_backoff(attempt)
                 logger.warning(

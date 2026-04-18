@@ -193,7 +193,7 @@ class ExitMonitor:
         # ── Ambil harga terkini dengan retry logic ──
         current_price = await self._fetch_price_with_retry(symbol)
         if current_price is None or current_price <= 0:
-            logger.warning(f"[EXIT] Invalid price for {symbol}: {current_price}")
+            logger.debug(f"[EXIT] Price not yet available for {symbol}, skipping this cycle")
             return
 
         # ── Cek Take Profit ──

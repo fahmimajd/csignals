@@ -490,6 +490,8 @@ class Database:
 
     async def get_active_signals(self) -> List[Dict]:
         """Get all active signals from database."""
+        if not self.pool:
+            return []
         try:
             async with self.pool.acquire() as conn:
                 query = '''

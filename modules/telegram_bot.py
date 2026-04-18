@@ -22,6 +22,15 @@ class TelegramNotifier:
             print("Telegram credentials not configured. Notifications disabled.")
             return False
 
+    async def close(self):
+        """Close the Telegram bot session cleanly to prevent unclosed aiohttp warnings."""
+        if self.bot:
+            try:
+                await self.bot.session.close()
+            except Exception:
+                pass
+            self.bot = None
+
     async def send_signal_alert(
         self,
         symbol: str,

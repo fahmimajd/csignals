@@ -56,21 +56,53 @@ class OpenInterestTracker(Monitor):
         """Start the update loops."""
         self._create_task(self._update_oi_loop())
         self._create_task(self._update_ratio_loop())
+        # Block until price data is populated for all symbols before returning.
+        # This ensures the main loop can read valid prices immediately.
+        await self._wait_for_initial_data()
 
     async def _on_stop(self):
         """Cleanup on stop."""
         pass
 
+    async def _wait_for_initial_data(self):
+        """
+        Block until price data is populated for at least one symbol.
+        Polls every 0.5s for up to 30 seconds before giving up (fail-open).
+        This ensures the main loop has valid price data immediately.
+        """
+        timeout = 30.0
+        interval = 0.5
+        elapsed = 0.0
+        while elapsed < timeout:
+            # Check if at least one symbol has a non-zero price
+            has_data = any(p > 0 for p in self.price_data.values())
+            if has_data:
+                logger.debug(f"Initial price data ready after {elapsed:.1f}s")
+                return
+            await asyncio.sleep(interval)
+            elapsed += interval
+        logger.warning(
+            f"Timeout ({timeout}s) waiting for initial price data — continuing anyway"
+        )
+
     async def _update_oi_loop(self):
         """Update open interest every OI_UPDATE_INTERVAL seconds."""
+        # Initial fetch immediately (before sleeping) so data is available right away
+        for symbol in config.SYMBOLS:
+            try:
+                await self._fetch_open_interest(symbol)
+                await self._fetch_price(symbol)
+            except Exception as e:
+                logger.warning(f"OI/Price fetch error for {symbol}: {e}")
+
         while self.running:
+            await asyncio.sleep(self.OI_UPDATE_INTERVAL)
             for symbol in config.SYMBOLS:
                 try:
                     await self._fetch_open_interest(symbol)
                     await self._fetch_price(symbol)
                 except Exception as e:
                     logger.warning(f"OI/Price fetch error for {symbol}: {e}")
-            await asyncio.sleep(self.OI_UPDATE_INTERVAL)
 
     async def _update_ratio_loop(self):
         """Update long/short ratio and taker volume every RATIO_UPDATE_INTERVAL seconds."""
@@ -136,8 +168,8 @@ class OpenInterestTracker(Monitor):
         url = "https://fapi.binance.com/futures/data/globalLongShortAccountRatio"
         params = {"symbol": symbol, "period": "5m", "limit": 1}
         try:
-            data = await self.client.request(
-                method="GET", url=url, params=params, verify=False
+            data = await self.client.futures_global_longshort_ratio(
+                symbol=symbol, period="5m", limit=1
             )
             if data and len(data) > 0:
                 # 'longShortRatio' is a string like "0.5231" (ratio of long / total)
@@ -171,8 +203,8 @@ class OpenInterestTracker(Monitor):
         url = "https://fapi.binance.com/futures/data/takerbuyselsvol"
         params = {"symbol": symbol, "period": "5m", "limit": 1}
         try:
-            data = await self.client.request(
-                method="GET", url=url, params=params, verify=False
+            data = await self.client.futures_taker_longshort_ratio(
+                symbol=symbol, period="5m", limit=1
             )
             if data and len(data) > 0:
                 buy_vol = float(data[0]["buyVol"])    # USDT buy volume
