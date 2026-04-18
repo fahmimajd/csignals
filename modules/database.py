@@ -271,48 +271,90 @@ class Database:
             logger.error(f"Error getting recent signals: {e}")
             return []
     
-    async def get_signal_stats(self, symbol: Optional[str] = None, 
+    async def get_signal_stats(self, symbol: Optional[str] = None,
                              days: int = 30) -> List[Dict]:
         """
         Get signal statistics for performance analysis.
-        
+
+        Computes stats directly from the signals table rather than relying on
+        the pre-aggregated signal_stats table (which requires update_daily_stats
+        to be called separately and was never populated).
+
         Args:
             symbol: Optional symbol filter
             days: Number of days to look back
-            
+
         Returns:
             List of statistics dictionaries
         """
         try:
             async with self.pool.acquire() as conn:
+                # Build date filter clause
+                date_filter = f"CURRENT_DATE - INTERVAL '{days} days'"
+
                 if symbol:
-                    query = '''
-                        SELECT * FROM signal_stats 
-                        WHERE symbol = $1 
-                        AND date >= CURRENT_DATE - INTERVAL '%s days'
+                    query = f'''
+                        SELECT
+                            $1                                           AS symbol,
+                            DATE(timestamp)                              AS date,
+                            COUNT(*)                                      AS total_signals,
+                            COUNT(CASE WHEN status = 'CLOSED_WIN'  THEN 1 END) AS winning_signals,
+                            COUNT(CASE WHEN status = 'CLOSED_LOSS' THEN 1 END) AS losing_signals,
+                            ROUND(
+                                AVG(CASE WHEN pnl_percent IS NOT NULL
+                                         THEN pnl_percent::numeric
+                                    END)::numeric, 4
+                            )                                             AS avg_pnl,
+                            ROUND(
+                                CASE WHEN COUNT(*) > 0 THEN
+                                    COUNT(CASE WHEN status = 'CLOSED_WIN' THEN 1 END)::numeric
+                                    / COUNT(*)::numeric * 100
+                                ELSE 0 END, 2
+                            )                                             AS winrate
+                        FROM signals
+                        WHERE symbol        = $1
+                          AND timestamp    >= {date_filter}
+                        GROUP BY DATE(timestamp)
                         ORDER BY date DESC
-                    ''' % days
+                    '''
                     rows = await conn.fetch(query, symbol)
                 else:
-                    query = '''
-                        SELECT * FROM signal_stats 
-                        WHERE date >= CURRENT_DATE - INTERVAL '%s days'
+                    query = f'''
+                        SELECT
+                            symbol,
+                            DATE(timestamp)                              AS date,
+                            COUNT(*)                                      AS total_signals,
+                            COUNT(CASE WHEN status = 'CLOSED_WIN'  THEN 1 END) AS winning_signals,
+                            COUNT(CASE WHEN status = 'CLOSED_LOSS' THEN 1 END) AS losing_signals,
+                            ROUND(
+                                AVG(CASE WHEN pnl_percent IS NOT NULL
+                                         THEN pnl_percent::numeric
+                                    END)::numeric, 4
+                            )                                             AS avg_pnl,
+                            ROUND(
+                                CASE WHEN COUNT(*) > 0 THEN
+                                    COUNT(CASE WHEN status = 'CLOSED_WIN' THEN 1 END)::numeric
+                                    / COUNT(*)::numeric * 100
+                                ELSE 0 END, 2
+                            )                                             AS winrate
+                        FROM signals
+                        WHERE timestamp >= {date_filter}
+                        GROUP BY symbol, DATE(timestamp)
                         ORDER BY symbol, date DESC
-                    ''' % days
+                    '''
                     rows = await conn.fetch(query)
-                
-                # Convert to list of dictionaries
+
+                # Convert rows to list of dicts with proper type coercion
                 stats = []
                 for row in rows:
                     stat = dict(row)
-                    # Convert Decimal to float
                     for key, value in stat.items():
                         if isinstance(value, Decimal):
                             stat[key] = float(value)
                     stats.append(stat)
-                
+
                 return stats
-                
+
         except Exception as e:
             logger.error(f"Error getting signal stats: {e}")
             return []
