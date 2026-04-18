@@ -388,6 +388,20 @@ body::before {
 .pnl-negative { color: var(--accent-danger); font-weight: 600; }
 .pnl-neutral { color: var(--text-secondary); }
 
+/* Price update animation for WebSocket real-time updates */
+.current-price-cell, .unrealized-pnl-cell {
+    transition: background-color 0.3s ease;
+}
+
+.price-updated {
+    animation: price-flash 0.5s ease;
+}
+
+@keyframes price-flash {
+    0% { background-color: rgba(0, 255, 255, 0.3); }
+    100% { background-color: transparent; }
+}
+
 /* ==================== DASHBOARD ROW ==================== */
 .dashboard-row {
     display: grid;
