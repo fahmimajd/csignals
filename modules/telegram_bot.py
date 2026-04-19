@@ -239,13 +239,35 @@ class TelegramNotifier:
             trail_stop = tp_sl_info.get('trail_stop', 0) or 0
             rr_ratio = tp_sl_info.get('rr_ratio', 'N/A')
             atr = tp_sl_info.get('atr', 0) or 0
+            
+            # Format prices with proper thousand separators and decimal precision
+            # Use locale-aware formatting or manual formatting for consistency
             lines.append(f"Entry Zone  : {entry_zone}")
-            lines.append(f"Stop Loss   : {stop_loss:,.2f} ({sl_percent:.2f}%)")
-            lines.append(f"TP Target   : {take_profit:,.2f} ({tp_percent:.2f}%)")
-            lines.append(f"Trail Start : {trail_start:,.2f}")
-            lines.append(f"Trail Stop  : {trail_stop:,.2f}")
+            lines.append(f"Stop Loss   : ${stop_loss:,.4f} ({sl_percent:.2f}%)")
+            lines.append(f"TP Target   : ${take_profit:,.4f} ({tp_percent:.2f}%)")
+            lines.append(f"Trail Start : ${trail_start:,.4f}")
+            lines.append(f"Trail Stop  : ${trail_stop:,.4f}")
             lines.append(f"R:R Ratio   : {rr_ratio}")
-            lines.append(f"ATR (14,1H) : {atr:,.2f}")
+            lines.append(f"ATR (14,1H) : {atr:,.4f}")
+            
+            # Monte Carlo info if available
+            mc_confidence = tp_sl_info.get('mc_confidence')
+            if mc_confidence:
+                mc_prob_tp = tp_sl_info.get('mc_prob_tp', 0) or 0
+                mc_prob_sl = tp_sl_info.get('mc_prob_sl', 0) or 0
+                mc_prob_expire = tp_sl_info.get('mc_prob_expire', 0) or 0
+                
+                lines.append("")
+                lines.append("<b>🎲 MONTE CARLO (1.000 simulasi):</b>")
+                lines.append(f"Prob TP     : {mc_prob_tp:.1f}%")
+                lines.append(f"Prob SL     : {mc_prob_sl:.1f}%")
+                lines.append(f"Prob Expire : {mc_prob_expire:.1f}%")
+                
+                # Add star emoji for HIGH confidence
+                if mc_confidence == "HIGH":
+                    lines.append(f"Confidence  : {mc_confidence} ⭐")
+                else:
+                    lines.append(f"Confidence  : {mc_confidence}")
 
         # Hold duration info if available
         if hold_duration:
@@ -260,6 +282,17 @@ class TelegramNotifier:
             lines.append(f"Durasi      : {dur_formatted}")
             lines.append(f"Deadline    : {deadline}")
             lines.append(f"Faktor      : ATR×{atr_factor:.2f} | Score×{score_factor:.2f} | Vol×{vol_factor:.2f}")
+
+        # Market regime info
+        regime_info = details.get('regime_info', {})
+        if regime_info and not regime_info.get('skipped', False):
+            lines.append("")
+            lines.append("<b>📊 MARKET REGIME:</b>")
+            regime = regime_info.get('regime', 'RANGING')
+            adx = regime_info.get('adx', 0.0)
+            conf_pct = int(regime_info.get('regime_confidence', 0.0) * 100)
+            lines.append(f"Market Regime : {regime} (ADX {adx:.1f})")
+            lines.append(f"Confidence    : {conf_pct}%")
 
         lines.append("")
         lines.append(f"🕐 {datetime.now().strftime('%H:%M:%S WIB')}")

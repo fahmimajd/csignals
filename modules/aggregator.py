@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Tuple, Optional, List
 
 import config
+from modules.volatility_regime import VolatilityRegimeDetector
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +101,8 @@ class SignalAggregator:
         self._prev_price: Dict[str, float] = {}
         # Display details
         self.signal_details: Dict[str, Dict] = {}
+        # Volatility regime detector
+        self.regime_detector = VolatilityRegimeDetector()
 
     # ─────────────────────────────────────────────────────────────────────
     # LEGACY INTERFACE — each update method stores one component's snapshot
@@ -206,17 +209,42 @@ class SignalAggregator:
                 )
         state.last_updated = time.time()
 
-    def compute_score(self, symbol: str) -> Tuple[int, List[ComponentResult]]:
+    async def compute_score(self, symbol: str) -> Tuple[int, List[ComponentResult], Dict]:
         """
         Compute a FRESH score from the current snapshot state.
 
-        Returns (score, components) where score is in [-6, +6].
+        Returns (score, components, regime_info) where:
+          - score is in [-6, +6]
+          - components is list of ComponentResult
+          - regime_info contains regime classification data
 
         This method is stateless with respect to score — result depends only
         on the current snapshot, never on previous calls.
+
+        Gate: Check volatility regime first. If CHOPPY, skip scoring entirely.
         """
         if symbol not in self._states:
-            return 0, []
+            return 0, [], {"regime": "RANGING", "skipped": False}
+
+        # ── Gate: Check volatility regime first ──────────────────────────────
+        regime_result = await self.regime_detector.detect(symbol)
+        regime = regime_result["regime"]
+        adx = regime_result["adx"]
+        atr_percentile = regime_result["atr_percentile"]
+        bbw_percentile = regime_result["bbw_percentile"]
+        regime_confidence = regime_result["confidence"]
+
+        # If CHOPPY, block signal immediately
+        if regime == "CHOPPY":
+            logger.info(f"[{symbol}] CHOPPY market detected - signal blocked")
+            return 0, [], {
+                "regime": regime,
+                "adx": adx,
+                "atr_percentile": atr_percentile,
+                "bbw_percentile": bbw_percentile,
+                "regime_confidence": regime_confidence,
+                "skipped": True
+            }
 
         s = self._states[symbol]
         components: List[ComponentResult] = []
@@ -329,13 +357,31 @@ class SignalAggregator:
         # ── Total score ───────────────────────────────────────────────────
         raw_score = sum(c.score_delta for c in components)
         raw_score = max(-self.MAX_COMPONENTS, min(self.MAX_COMPONENTS, raw_score))
-        return raw_score, components
+
+        # Apply regime multiplier to confidence (not score itself)
+        # TRENDING: no change, RANGING: reduce confidence by 20%
+        if regime == "TRENDING":
+            confidence_multiplier = 1.0
+        elif regime == "RANGING":
+            confidence_multiplier = 0.8
+        else:
+            confidence_multiplier = 1.0
+
+        return raw_score, components, {
+            "regime": regime,
+            "adx": adx,
+            "atr_percentile": atr_percentile,
+            "bbw_percentile": bbw_percentile,
+            "regime_confidence": regime_confidence,
+            "confidence_multiplier": confidence_multiplier,
+            "skipped": False
+        }
 
     # ─────────────────────────────────────────────────────────────────────
     # LEGACY GETTERS — used by main.py
     # ─────────────────────────────────────────────────────────────────────
 
-    def get_signal(self, symbol: str) -> Tuple[str, int, int, Dict, str]:
+    async def get_signal(self, symbol: str) -> Tuple[str, int, int, Dict, str]:
         """
         Returns (signal, score_100, raw_score, details, emoji).
 
@@ -343,7 +389,7 @@ class SignalAggregator:
         score_100: 0–100 (linear scale)
         raw_score: -6 to +6
         """
-        raw_score, _ = self.compute_score(symbol)
+        raw_score, _, regime_info = await self.compute_score(symbol)
         score_100 = self.raw_to_100(raw_score)
 
         if score_100 >= 75:
@@ -357,7 +403,11 @@ class SignalAggregator:
         else:
             signal, emoji = 'NEUTRAL', '⚪'
 
-        return signal, score_100, raw_score, self.signal_details.get(symbol, {}), emoji
+        # Store regime info in details for Telegram and display
+        details = self.signal_details.get(symbol, {}).copy()
+        details['regime_info'] = regime_info
+
+        return signal, score_100, raw_score, details, emoji
 
     def get_signal_type(self, score: int) -> str:
         abs_s = abs(score)
@@ -373,8 +423,8 @@ class SignalAggregator:
         normalized = (raw_score + 6) / 12
         return int(normalized * 100)
 
-    def get_raw_score(self, symbol: str) -> int:
-        score, _ = self.compute_score(symbol)
+    async def get_raw_score(self, symbol: str) -> int:
+        score, _, _ = await self.compute_score(symbol)
         return score
 
     def is_strong(self, score: int) -> bool:

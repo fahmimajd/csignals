@@ -4,70 +4,40 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.Python
-env/
-venv/
-.venv/
-.ENV
-.ENV.local
-.env
-.env.local
-.env.*
+*.py~
+*.py.class
 
-# Build and distribution artifacts
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build artifacts
 build/
 dist/
 *.egg-info/
 
-# Testing
-.coverage
-coverage/
-htmlcov/
-.pytest_cache/
-.mypy_cache/
-
 # Logs
 *.log
 
-# OS generated files
-.DS_Store
-Thumbs.db
+# Environment files
+.env
+.env.local
+*.env.*
 
-# IDE
+# IDE and editor files
 .vscode/
 .idea/
 *.swp
 *.swo
 *.tmp
 
-# Dependencies
-node_modules/
+# Coverage reports
+.coverage
+coverage/
+htmlcov/
 
-# Compression
-*.zip
-*.gz
-*.tar
-*.tgz
-*.bz2
-*.xz
-*.7z
-*.rar
-*.zst
-*.lz4
-*.lzh
-*.cab
-*.arj
-*.rpm
-*.deb
-*.Z
-*.lz
-*.lzo
-*.tar.gz
-*.tar.bz2
-*.tar.xz
-*.tar.zst
+# Testing
+.pytest_cache/
+.mypy_cache/
 ```
-# Dev tools
-.claw/
-.sandbox-home/
-.clawd-todos.json

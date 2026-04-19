@@ -62,3 +62,8 @@ DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 # Display
 UPDATE_INTERVAL = 10  # seconds
 LOG_FILE = "logs/signals.log"
+
+# Monte Carlo Filter
+MC_N_SIMULATIONS = 1000  # Number of simulation runs
+MC_MIN_PROB_TP = 40.0    # Minimum TP probability (%) to not skip signal
+MC_HIGH_CONF = 65.0      # TP probability (%) for HIGH confidence
