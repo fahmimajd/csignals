@@ -677,12 +677,16 @@ class CryptoSignalApp:
         self.running = False
 
         try:
-            # Stop all monitors
+            # Stop all monitors — cancel tasks first so they can clean up aiohttp sessions
             for name, monitor in self.monitors.items():
                 try:
                     await monitor.stop()
                 except Exception as e:
                     logger.warning(f"Error stopping {name} monitor: {e}")
+
+            # Give cancelled tasks a moment to run __aexit__ on aiohttp sessions
+            # This prevents "Unclosed client session" warnings on shutdown
+            await asyncio.sleep(1.0)
 
             # Close shared client connection
             try:

@@ -14,8 +14,9 @@ from binance.exceptions import BinanceWebsocketQueueOverflow, BinanceWebsocketUn
 logger = logging.getLogger(__name__)
 
 # Number of symbol streams to bundle per multiplex socket.
-# Keeping this low avoids queue overflow in the shared BinanceSocketManager.
-STREAMS_PER_SOCKET = 5
+# Lower = less queue pressure on BinanceSocketManager, fewer overflow errors.
+# 3 streams per socket = 5 batches for 15 symbols (manageable message rate).
+STREAMS_PER_SOCKET = 3
 
 
 # Tiered whale thresholds — smaller-cap assets have lower minimums
