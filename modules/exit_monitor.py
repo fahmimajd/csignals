@@ -229,12 +229,28 @@ class ExitMonitor:
             return
 
         # Handle timezone-aware comparison
+        # FIX: Deadline dari DB tanpa timezone = WIB (UTC+7), bukan UTC!
+        WIB = timezone(timedelta(hours=7))
         now_utc = datetime.now(timezone.utc)
         if deadline.tzinfo is None:
-            # Assume deadline is in local timezone
-            deadline_utc = deadline.replace(tzinfo=timezone.utc)
+            # Deadline disimpan sebagai naive datetime dalam WIB
+            deadline_utc = deadline.replace(tzinfo=WIB).astimezone(timezone.utc)
         else:
             deadline_utc = deadline.astimezone(timezone.utc)
+
+        # ── Smart Exit: close di profit jika mendekati deadline ──
+        time_remaining = (deadline_utc - now_utc).total_seconds()
+        if 0 < time_remaining < 1800:  # < 30 menit sebelum deadline
+            pnl = ((current_price - entry) / entry * 100
+                   if is_long
+                   else (entry - current_price) / entry * 100)
+            if pnl > 0.5:  # Minimal 0.5% profit
+                await self._close_signal(signal_id, 'CLOSED_WIN', current_price, pnl, symbol)
+                logger.info(
+                    f"[EXIT] ⏰ {symbol} Smart exit near deadline: "
+                    f"+{pnl:.2f}% (sisa {time_remaining/60:.0f}m)"
+                )
+                return
 
         if now_utc >= deadline_utc:
             await self._handle_deadline(signal, current_price)

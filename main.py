@@ -106,6 +106,10 @@ class CryptoSignalApp:
                         symbol = s.get('symbol')
                         if config.SYMBOL_PATTERN and config.SYMBOL_PATTERN not in symbol:
                             continue
+                        # Skip non-ASCII symbols (Chinese characters, etc.)
+                        if not symbol.isascii():
+                            logger.debug(f"Skipping non-ASCII symbol: {symbol}")
+                            continue
                         symbols.append(symbol)
 
                 # Filter by volume if configured

@@ -90,6 +90,13 @@ class TPSLCalculator(Monitor):
             atr = entry_price * 0.01  # Fallback: 1% of price
 
         sl_distance = atr * config.SL_MULTIPLIER
+        
+        # Enforce maximum SL cap (e.g., 10%)
+        max_sl_dist = entry_price * config.MAX_SL_PERCENT
+        if sl_distance > max_sl_dist:
+            logger.info(f"SL distance for {symbol} capped at {config.MAX_SL_PERCENT*100}%")
+            sl_distance = max_sl_dist
+
         min_sl = entry_price * 0.005  # 0.5% minimum protection
 
         if sl_distance < min_sl:

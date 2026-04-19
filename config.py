@@ -15,7 +15,7 @@ BINANCE_TESTNET = os.getenv("BINANCE_TESTNET", "False").lower() == "true"
 # - Pattern: "USDT" will match all symbols ending with USDT
 SYMBOLS = "ALL"
 SYMBOL_PATTERN = "USDT"  # Filter symbols containing this string
-TOP_N_BY_VOLUME = 20  # If SYMBOLS="ALL", take top N by 24h volume
+TOP_N_BY_VOLUME = 15  # If SYMBOLS="ALL", take top N by 24h volume (focused on liquid pairs)
 
 # Thresholds
 # PERUBAHAN 2: disesuaikan — STRONG_THRESHOLD turun, graduated di aggregator
@@ -29,11 +29,12 @@ LIQUIDATION_WINDOW_MINUTES = 5
 # ATR and TP/SL
 ATR_PERIOD = 14
 ATR_TIMEFRAME = "1h"
-SL_MULTIPLIER = 1.5
-TP_MULTIPLIER = 3.0
+SL_MULTIPLIER = 1.0        # Tighter SL: 1x ATR (dari 1.5x — kurangi loss per trade)
+TP_MULTIPLIER = 2.5        # Slightly reduced TP for higher hit rate (dari 3.0x)
 TRAIL_TRIGGER_ATR = 1.0
 TRAIL_DISTANCE_ATR = 0.75
 MIN_RR_RATIO = 1.2  # (dari 1.5 — lebih banyak sinyal lolos)
+MAX_SL_PERCENT = 0.10  # Maximum SL distance (10% of entry price)
 
 # Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -41,8 +42,8 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 # Confirmation Layer
 CONFIRMATION_MINUTES = 1   # PERUBAHAN 2: tetap 1 menit
-CONFIRMATION_CANDLES = 2   # PERUBAHAN 2: turun dari 3 → cukup 2 candles
-SIGNAL_COOLDOWN_MINUTES = 15
+CONFIRMATION_CANDLES = 3   # Kembali ke 3 — mengurangi false positives
+SIGNAL_COOLDOWN_MINUTES = 30  # Lebih lama (dari 15) — hindari whipsaw
 
 # Hold Duration Parameters
 BASE_HOURS = 6           # Titik tengah durasi hold (jam)
