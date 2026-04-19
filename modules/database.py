@@ -88,7 +88,13 @@ class Database:
                     expired_pnl_pct DECIMAL(8,4),
                     
                     -- PATCH: Dedup key for preventing duplicate signals
-                    dedup_key VARCHAR(200)
+                    dedup_key VARCHAR(200),
+                    
+                    -- Monte Carlo columns
+                    mc_prob_tp DECIMAL(5,1),
+                    mc_prob_sl DECIMAL(5,1),
+                    mc_prob_expire DECIMAL(5,1),
+                    mc_confidence VARCHAR(10)
                 )
             ''')
             
@@ -161,14 +167,15 @@ class Database:
         """
         try:
             async with self.pool.acquire() as conn:
-                # Insert signal record
+                # Insert signal record with Monte Carlo columns
                 query = '''
                     INSERT INTO signals (
                         symbol, signal_type, score, entry_price, stop_loss, 
                         take_profit, atr_value, rr_ratio, tp_source, 
-                        trail_start, trail_stop, confirmed_at, status
+                        trail_start, trail_stop, confirmed_at, status,
+                        mc_prob_tp, mc_prob_sl, mc_prob_expire, mc_confidence
                     ) VALUES (
-                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
                     ) RETURNING id
                 '''
                 
@@ -186,7 +193,11 @@ class Database:
                     signal_data.get('trail_start'),
                     signal_data.get('trail_stop'),
                     signal_data.get('confirmed_at', datetime.now()),
-                    'ACTIVE'
+                    'ACTIVE',
+                    signal_data.get('mc_prob_tp'),
+                    signal_data.get('mc_prob_sl'),
+                    signal_data.get('mc_prob_expire'),
+                    signal_data.get('mc_confidence')
                 )
                 
                 logger.info(f"Saved signal {signal_id} for {symbol}")

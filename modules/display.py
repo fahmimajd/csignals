@@ -138,6 +138,71 @@ class TerminalDisplay:
             self._checkmark(top_signal)
         )
 
+        # Volatility Regime
+        regime = data.get('regime', 'RANGING')
+        adx = data.get('adx', 0.0)
+        regime_conf = data.get('regime_confidence', 0.0)
+        regime_skipped = data.get('regime_skipped', False)
+        
+        if regime == "TRENDING":
+            regime_color = "[green]"
+            regime_icon = "✅"
+        elif regime == "RANGING":
+            regime_color = "[yellow]"
+            regime_icon = "⚠️"
+        else:  # CHOPPY
+            regime_color = "[red]"
+            regime_icon = "🚫 (SINYAL DIBLOK)"
+        
+        conf_pct = int(regime_conf * 100)
+        metrics_table.add_row(
+            "VOLATILITY REGIME",
+            f"{regime_color}{regime} (ADX: {adx:.1f}, conf: {conf_pct}%)[/]",
+            f"{regime_icon}" if regime != "CHOPPY" else ""
+        )
+
+        # Monte Carlo (if available in tp_sl data)
+        tp_sl = data.get('tp_sl', {})
+        mc_confidence = tp_sl.get('mc_confidence')
+        if mc_confidence:
+            mc_prob_tp = tp_sl.get('mc_prob_tp', 0) or 0
+            mc_prob_sl = tp_sl.get('mc_prob_sl', 0) or 0
+            mc_prob_expire = tp_sl.get('mc_prob_expire', 0) or 0
+            
+            # Create progress bar visualization
+            total = mc_prob_tp + mc_prob_sl + mc_prob_expire
+            if total > 0:
+                tp_bar_len = int(10 * mc_prob_tp / 100)
+                sl_bar_len = int(10 * mc_prob_sl / 100)
+                exp_bar_len = 10 - tp_bar_len - sl_bar_len
+                bar = "█" * tp_bar_len + "▓" * sl_bar_len + "░" * exp_bar_len
+            else:
+                bar = "░░░░░░░░░░"
+            
+            if mc_confidence == "HIGH":
+                mc_color = "[green]"
+                mc_icon = "✅"
+            elif mc_confidence == "MEDIUM":
+                mc_color = "[yellow]"
+                mc_icon = "⚠️"
+            elif mc_confidence == "LOW":
+                mc_color = "[orange]"
+                mc_icon = "⚪"
+            else:  # SKIP
+                mc_color = "[red]"
+                mc_icon = "🚫"
+            
+            metrics_table.add_row(
+                "MONTE CARLO",
+                f"{mc_color}TP:{mc_prob_tp:.1f}% SL:{mc_prob_sl:.1f}% Exp:{mc_prob_expire:.1f}[/]",
+                f"{bar} {mc_icon}"
+            )
+            metrics_table.add_row(
+                "Confidence",
+                f"{mc_color}{mc_confidence}[/]",
+                "⭐" if mc_confidence == "HIGH" else ""
+            )
+
         self.console.print(metrics_table)
 
         # Print TP/SL if available

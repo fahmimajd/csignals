@@ -25,6 +25,7 @@ from modules.telegram_bot import TelegramNotifier
 from modules.display import TerminalDisplay
 from modules.hold_duration import HoldDurationCalculator
 from modules.exit_monitor import ExitMonitor
+from modules.monte_carlo import MonteCarloFilter
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ class CryptoSignalApp:
         self.telegram_notifier = TelegramNotifier()
         self.client_manager = BinanceClientManager()
         self.hold_calculator = HoldDurationCalculator()
+        self.monte_carlo_filter = MonteCarloFilter()
         
         # CRITICAL FIX: Per-symbol locks to prevent race conditions
         self._symbol_locks: Dict[str, asyncio.Lock] = {}
@@ -171,7 +173,7 @@ class CryptoSignalApp:
                 signals = {}
                 for symbol in config.SYMBOLS:
                     async with self._get_symbol_lock(symbol):
-                        signal_type, score_100, raw_score, details, emoji = self.aggregator.get_signal(symbol)
+                        signal_type, score_100, raw_score, details, emoji = await self.aggregator.get_signal(symbol)
                         signals[symbol] = {
                             'signal': signal_type,
                             'score_100': score_100,
@@ -235,6 +237,24 @@ class CryptoSignalApp:
                                     # Calculate deadline
                                     hold_deadline = datetime.now() + timedelta(hours=hold_result['hold_hours'])
 
+                                    # === MONTE CARLO FILTER (after TP/SL calculated, before Telegram/DB) ===
+                                    mc_result = await self.monte_carlo_filter.evaluate(
+                                        symbol=symbol,
+                                        entry_price=price,
+                                        take_profit=tp_sl_info.get('take_profit', 0),
+                                        stop_loss=tp_sl_info.get('stop_loss', 0),
+                                        hold_hours=hold_result['hold_hours'],
+                                        signal_type=confirmed_signal
+                                    )
+
+                                    # Check if MC says to skip
+                                    if mc_result.get('skipped', False):
+                                        logger.info(
+                                            f"[MC] {symbol} skipped: prob_tp={mc_result['prob_tp']}% "
+                                            f"< {config.MC_MIN_PROB_TP}% threshold"
+                                        )
+                                        continue  # Skip this signal, don't send Telegram or save to DB
+
                                     # Format hold_duration for telegram
                                     hold_duration_tg = {
                                         'formatted_duration': self.hold_calculator.format_duration(hold_result['hold_hours']),
@@ -244,6 +264,12 @@ class CryptoSignalApp:
                                         'score_factor': hold_result['score_factor'],
                                         'volume_factor': hold_result['volume_factor']
                                     }
+
+                                    # Add MC info to tp_sl_info for display
+                                    tp_sl_info['mc_prob_tp'] = mc_result['prob_tp']
+                                    tp_sl_info['mc_prob_sl'] = mc_result['prob_sl']
+                                    tp_sl_info['mc_prob_expire'] = mc_result['prob_expire']
+                                    tp_sl_info['mc_confidence'] = mc_result['confidence']
 
                                     # === SEND TELEGRAM FIRST (most important) ===
                                     try:
@@ -259,6 +285,12 @@ class CryptoSignalApp:
                                     # === THEN SAVE TO DB (non-critical, wrap each in try/except) ===
                                     signal_id = None
                                     try:
+                                        # Add MC data to signal_data
+                                        signal_data['mc_prob_tp'] = mc_result['prob_tp']
+                                        signal_data['mc_prob_sl'] = mc_result['prob_sl']
+                                        signal_data['mc_prob_expire'] = mc_result['prob_expire']
+                                        signal_data['mc_confidence'] = mc_result['confidence']
+
                                         signal_id = await self.database.save_signal(symbol, signal_data)
                                         logger.info(f"Signal saved to DB: {symbol} {confirmed_signal} (ID: {signal_id})")
                                     except Exception as db_err:
@@ -309,7 +341,7 @@ class CryptoSignalApp:
                                 )
 
                 # Prepare and update display
-                display_data = self._prepare_display_data(symbol_data, signals)
+                display_data = await self._prepare_display_data(symbol_data, signals)
                 try:
                     self.display.update_display(display_data)
                 except (BrokenPipeError, SystemExit, OSError) as disp_err:
@@ -502,7 +534,7 @@ class CryptoSignalApp:
             'atr': atr
         }
 
-    def _prepare_display_data(self, symbol_data: Dict, signals: Dict) -> Dict:
+    async def _prepare_display_data(self, symbol_data: Dict, signals: Dict) -> Dict:
         """Prepare data for terminal display."""
         display_data = {}
 
@@ -512,11 +544,22 @@ class CryptoSignalApp:
 
             tp_sl = self.monitors['tp_sl']
 
+            # Get regime info from aggregator cache
+            regime_cache = self.aggregator.regime_detector._cache.get(symbol)
+            regime_info = {}
+            if regime_cache:
+                regime_info = {
+                    'regime': regime_cache.regime,
+                    'adx': regime_cache.adx,
+                    'regime_confidence': regime_cache.confidence,
+                    'regime_skipped': False
+                }
+
             # Get hold duration info if this symbol has an active signal
             hold_duration_info = {}
             for sig_id, sig_info in self.active_signals.items():
                 if sig_info['symbol'] == symbol:
-                    hold_duration_info = self._build_hold_duration_display(sig_info)
+                    hold_duration_info = await self._build_hold_duration_display(sig_info)
                     break
 
             display_data[symbol] = {
@@ -546,12 +589,13 @@ class CryptoSignalApp:
                 'confirmation_progress': signal_info.get('confirmation_progress', 0),
                 'confirmation_total': signal_info.get('confirmation_total', config.CONFIRMATION_MINUTES),
                 'hold_duration': hold_duration_info,
-                'current_price': data.get('openinterest', {}).get('price', 0)
+                'current_price': data.get('openinterest', {}).get('price', 0),
+                **regime_info
             }
 
         return display_data
 
-    def _build_hold_duration_display(self, sig_info: Dict) -> Dict:
+    async def _build_hold_duration_display(self, sig_info: Dict) -> Dict:
         """Build hold duration display info from active signal."""
         now = datetime.now()
         deadline = sig_info['hold_deadline']
@@ -569,7 +613,7 @@ class CryptoSignalApp:
 
         # Check extension eligibility
         trail_active = self.trailing_manager.is_trail_active(sig_info['symbol'])
-        current_score = self.aggregator.get_raw_score(sig_info['symbol'])
+        current_score = await self.aggregator.get_raw_score(sig_info['symbol'])
         eligible, reason = self.hold_calculator.check_extension_eligibility(
             current_score=current_score,
             trail_active=trail_active,
