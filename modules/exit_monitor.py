@@ -199,6 +199,23 @@ class ExitMonitor:
         # ── TRACK: Update running highest/lowest price for retroactive TP/SL check ──
         await self.db.update_signal_price_range(signal_id, current_price, current_price)
 
+        # ── Cek Take Profit dengan Trailing Stop ──
+        # First check if trailing stop is active and has updated the stop level
+        trailing_stop = None
+        if self.trailing_manager:
+            trailing_stop = self.trailing_manager.update_trailing_stop(
+                symbol=symbol,
+                side='LONG' if is_long else 'SHORT',
+                entry_price=entry,
+                current_price=current_price,
+                atr=float(signal.get('atr', 0) or 0)
+            )
+            
+            # If trailing stop returned a new level, use it instead of original SL
+            if trailing_stop is not None:
+                stop_loss = trailing_stop
+                logger.debug(f"[EXIT] {symbol} Trailing stop updated to {trailing_stop:.4f}")
+        
         # ── Cek Take Profit ──
         if is_long and current_price >= take_profit:
             pnl = (current_price - entry) / entry * 100
@@ -212,17 +229,19 @@ class ExitMonitor:
             logger.info(f"[EXIT] ✅ {symbol} HIT_TP id={signal_id}: +{pnl:.2f}%")
             return
 
-        # ── Cek Stop Loss ──
+        # ── Cek Stop Loss (dengan trailing stop jika aktif) ──
         if is_long and stop_loss > 0 and current_price <= stop_loss:
             pnl = (current_price - entry) / entry * 100
-            await self._close_signal(signal_id, 'CLOSED_LOSS', stop_loss, pnl, symbol)
-            logger.info(f"[EXIT] ❌ {symbol} HIT_SL id={signal_id}: {pnl:.2f}%")
+            exit_type = 'CLOSED_LOSS_TRAILING' if trailing_stop else 'CLOSED_LOSS'
+            await self._close_signal(signal_id, exit_type, stop_loss, pnl, symbol)
+            logger.info(f"[EXIT] ❌ {symbol} HIT_SL id={signal_id}: {pnl:.2f}% {'(trailing)' if trailing_stop else ''}")
             return
 
         if not is_long and stop_loss > 0 and current_price >= stop_loss:
             pnl = (entry - current_price) / entry * 100
-            await self._close_signal(signal_id, 'CLOSED_LOSS', stop_loss, pnl, symbol)
-            logger.info(f"[EXIT] ❌ {symbol} HIT_SL id={signal_id}: {pnl:.2f}%")
+            exit_type = 'CLOSED_LOSS_TRAILING' if trailing_stop else 'CLOSED_LOSS'
+            await self._close_signal(signal_id, exit_type, stop_loss, pnl, symbol)
+            logger.info(f"[EXIT] ❌ {symbol} HIT_SL id={signal_id}: {pnl:.2f}% {'(trailing)' if trailing_stop else ''}")
             return
 
         # ── Cek Deadline ──

@@ -30,9 +30,17 @@ class MonteCarloFilter:
     def _calculate_drift(self, closes: list, hours: int = 6) -> float:
         """
         Calculate drift from recent N hours.
+        IMPROVED: Uses zero-drift (martingale) assumption for conservative simulation.
+        Research shows recent drift in crypto is often mean-reverting and unreliable.
+        
         Positive = uptrend, negative = downtrend
         Returns drift per hour
         """
+        # ZERO DRIFT assumption - more conservative and realistic for crypto
+        # Recent drift often reverses sharply during news/liquidation events
+        return 0.0
+        
+        # Original code kept for reference (disabled):
         if len(closes) < hours:
             hours = min(len(closes), 6)
         
