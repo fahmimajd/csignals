@@ -28,15 +28,34 @@ const Utils = {
         if (isNaN(d.getTime())) return '--';
         return d.toLocaleString();
     },
-    fmtCountdown(deadline) {
-        if (!deadline) return '--';
+    /**
+     * Format elapsed duration since a timestamp.
+     * @param {string|Date} startTime - ISO timestamp or Date of when the signal started
+     * @returns {string} Human-readable duration like "2h 15m" or "3d 1h"
+     */
+    fmtDuration(startTime) {
+        if (!startTime) return '--';
+        const start = new Date(startTime);
+        if (isNaN(start.getTime())) return '--';
         const now = new Date();
-        const end = new Date(deadline);
-        const diff = end - now;
-        if (diff <= 0) return '<span class="pnl-negative">EXPIRED</span>';
-        const h = Math.floor(diff / 3600000);
-        const m = Math.floor((diff % 3600000) / 60000);
-        return `${h}h ${m}m`;
+        const diff = now - start;
+        if (diff < 0) return '--';
+        const days = Math.floor(diff / 86400000);
+        const hours = Math.floor((diff % 86400000) / 3600000);
+        const mins = Math.floor((diff % 3600000) / 60000);
+        if (days > 0) return `${days}d ${hours}h`;
+        if (hours > 0) return `${hours}h ${mins}m`;
+        return `${mins}m`;
+    },
+    /**
+     * Get CSS class for long-running signals (over 12h).
+     * @param {string|Date} startTime
+     * @returns {string} CSS class
+     */
+    durationClass(startTime) {
+        if (!startTime) return 'duration-cell';
+        const diff = new Date() - new Date(startTime);
+        return diff > 43200000 ? 'duration-cell duration-long' : 'duration-cell';
     },
     signalClass(type) {
         if (!type) return '';
@@ -127,7 +146,7 @@ class Modal {
                 <div class="detail-item"><div class="label">PnL</div><div class="value ${pnlCls}">${pnl != null ? (pnl > 0 ? '+' : '') + Number(pnl).toFixed(2) + '%' : '--'}</div></div>
                 <div class="detail-item"><div class="label">Exit Price</div><div class="value">${signal.exit_price ? Utils.fmtPrice(signal.exit_price) : '--'}</div></div>
                 <div class="detail-item"><div class="label">Hold Hours</div><div class="value">${signal.hold_hours || '--'}h</div></div>
-                <div class="detail-item"><div class="label">Hold Deadline</div><div class="value">${Utils.fmtCountdown(signal.hold_deadline)}</div></div>
+                <div class="detail-item"><div class="label">Running For</div><div class="value">${Utils.fmtDuration(signal.confirmed_at || signal.timestamp)}</div></div>
                 ${extInfo}
                 <div class="detail-item"><div class="label">Entry Time</div><div class="value">${Utils.fmtTime(signal.confirmed_at || signal.timestamp)}</div></div>
                 <div class="detail-item"><div class="label">Exit Time</div><div class="value">${Utils.fmtTime(signal.exit_time)}</div></div>
@@ -506,8 +525,7 @@ const App = {
     async loadDashboard() {
         await Promise.all([
             this.loadSummary(),
-            this.loadActiveSignals(),
-            this.loadNearDeadline()
+            this.loadActiveSignals()
         ]);
     },
 
@@ -552,8 +570,8 @@ const App = {
                 <td>${Utils.fmtPrice(s.stop_loss)}</td>
                 <td>${Utils.fmtPrice(s.take_profit)}</td>
                 <td>${s.rr_ratio || '--'}</td>
-                <td>${Utils.fmtCountdown(s.hold_deadline)}</td>
-                <td><button class="action-btn" onclick='App.modal.show(JSON.parse(this.dataset.signal))' data-signal="${sJson}"><i class="fas fa-eye"></i></button></td>
+                <td class="${Utils.durationClass(s.confirmed_at || s.timestamp)}">${Utils.fmtDuration(s.confirmed_at || s.timestamp)}</td>
+                <td><button class="action-btn" onclick='App.modal.show(JSON.parse(this.dataset.signal))' data-signal="${sJson}" aria-label="View signal details for ${s.symbol}"><i class="fas fa-eye" aria-hidden="true"></i></button></td>
             </tr>`;
             }).join('');
         }
@@ -562,32 +580,6 @@ const App = {
         this.setConnectionStatus(true);
     },
 
-    async loadNearDeadline() {
-        const result = await Utils.api('/api/signals/near-deadline?minutes=60');
-        if (!result) return;
-        const signals = result.data || [];
-
-        document.getElementById('deadline-count').textContent = signals.length;
-        const list = document.getElementById('deadline-list');
-
-        if (signals.length === 0) {
-            list.innerHTML = '<div class="deadline-item loading">No signals near deadline</div>';
-            return;
-        }
-
-        list.innerHTML = signals.map(s => `
-            <div class="deadline-item">
-                <div>
-                    <div class="dl-symbol">${s.symbol}</div>
-                    <div class="dl-signal ${Utils.signalClass(s.signal_type)}">${Utils.signalLabel(s.signal_type)}</div>
-                </div>
-                <div style="text-align:right">
-                    <div class="dl-countdown">${Utils.fmtCountdown(s.hold_deadline)}</div>
-                    <div class="dl-time">${s.hold_hours ? s.hold_hours + 'h hold' : ''}</div>
-                </div>
-            </div>
-        `).join('');
-    },
 
     setConnectionStatus(connected) {
         const dot = document.getElementById('status-dot');

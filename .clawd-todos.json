@@ -1,12 +1,1 @@
-[
-  {
-    "content": "Fix whale WebSocket queue overflow (reduce STREAMS_PER_SOCKET)",
-    "activeForm": "Fixing whale WebSocket queue overflow",
-    "status": "completed"
-  },
-  {
-    "content": "Fix unclosed aiohttp sessions on shutdown",
-    "activeForm": "Fixing unclosed aiohttp sessions",
-    "status": "in_progress"
-  }
-]
+[]

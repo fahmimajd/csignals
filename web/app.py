@@ -178,22 +178,6 @@ def get_active_signals():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@app.route('/api/signals/near-deadline')
-def get_signals_near_deadline():
-    """Get signals near their hold deadline"""
-    try:
-        minutes = request.args.get('minutes', 30, type=int)
-        signals = _run_async(db.get_signals_near_deadline(minutes=minutes))
-        return jsonify({
-            'success': True,
-            'data': _serialize(signals),
-            'count': len(signals),
-            'timestamp': datetime.now().isoformat()
-        })
-    except Exception as e:
-        logger.error(f"Error fetching near-deadline signals: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
 
 @app.route('/api/signals/<int:signal_id>')
 def get_signal_detail(signal_id):

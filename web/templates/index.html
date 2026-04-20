@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Cyberpunk Signal Monitor — Real-time crypto trading signal dashboard with live prices, analytics, and performance tracking.">
     <title>Cyberpunk Signal Monitor</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
@@ -10,80 +11,80 @@
 </head>
 <body>
     <!-- Navigation -->
-    <nav class="cyber-nav">
+    <nav class="cyber-nav" role="navigation" aria-label="Main navigation">
         <div class="nav-brand">
-            <i class="fas fa-wave-square"></i>
+            <i class="fas fa-wave-square" aria-hidden="true"></i>
             <span class="glitch-text" data-text="CRYPTO SIGNAL">CRYPTO SIGNAL</span>
         </div>
-        <div class="nav-links">
-            <a href="#" class="nav-link active" data-tab="dashboard">
-                <i class="fas fa-tachometer-alt"></i> Dashboard
+        <div class="nav-links" role="tablist">
+            <a href="#" class="nav-link active" data-tab="dashboard" role="tab" aria-selected="true" aria-controls="tab-dashboard" id="nav-dashboard">
+                <i class="fas fa-tachometer-alt" aria-hidden="true"></i> Dashboard
             </a>
-            <a href="#" class="nav-link" data-tab="signals">
-                <i class="fas fa-signal"></i> Signals
+            <a href="#" class="nav-link" data-tab="signals" role="tab" aria-selected="false" aria-controls="tab-signals" id="nav-signals">
+                <i class="fas fa-signal" aria-hidden="true"></i> Signals
             </a>
-            <a href="#" class="nav-link" data-tab="analytics">
-                <i class="fas fa-chart-bar"></i> Analytics
+            <a href="#" class="nav-link" data-tab="analytics" role="tab" aria-selected="false" aria-controls="tab-analytics" id="nav-analytics">
+                <i class="fas fa-chart-bar" aria-hidden="true"></i> Analytics
             </a>
-            <a href="#" class="nav-link" data-tab="history">
-                <i class="fas fa-history"></i> History
+            <a href="#" class="nav-link" data-tab="history" role="tab" aria-selected="false" aria-controls="tab-history" id="nav-history">
+                <i class="fas fa-history" aria-hidden="true"></i> History
             </a>
         </div>
         <div class="nav-status">
             <div class="status-indicator">
-                <i class="fas fa-circle status-dot" id="status-dot"></i>
+                <i class="fas fa-circle status-dot" id="status-dot" aria-hidden="true"></i>
                 <span id="connection-status">Connecting...</span>
             </div>
             <div class="time-display">
-                <i class="fas fa-clock"></i> <span id="current-time">--:--:--</span>
+                <i class="fas fa-clock" aria-hidden="true"></i> <span id="current-time">--:--:--</span>
             </div>
         </div>
     </nav>
 
     <!-- Main Content -->
-    <div class="main-container">
+    <main class="main-container">
 
         <!-- ===== DASHBOARD TAB ===== -->
-        <div class="tab-content active" id="tab-dashboard">
+        <div class="tab-content active" id="tab-dashboard" role="tabpanel" aria-labelledby="nav-dashboard">
             <!-- Summary Cards -->
             <div class="summary-grid">
                 <div class="summary-card" id="card-total">
-                    <div class="card-icon"><i class="fas fa-bolt"></i></div>
+                    <div class="card-icon"><i class="fas fa-bolt" aria-hidden="true"></i></div>
                     <div class="card-info">
                         <h3>Total Signals</h3>
                         <p class="card-value" id="val-total">--</p>
                     </div>
                 </div>
                 <div class="summary-card card-win" id="card-wins">
-                    <div class="card-icon"><i class="fas fa-trophy"></i></div>
+                    <div class="card-icon"><i class="fas fa-trophy" aria-hidden="true"></i></div>
                     <div class="card-info">
                         <h3>Wins</h3>
                         <p class="card-value" id="val-wins">--</p>
                     </div>
                 </div>
                 <div class="summary-card card-loss" id="card-losses">
-                    <div class="card-icon"><i class="fas fa-times-circle"></i></div>
+                    <div class="card-icon"><i class="fas fa-times-circle" aria-hidden="true"></i></div>
                     <div class="card-info">
                         <h3>Losses</h3>
                         <p class="card-value" id="val-losses">--</p>
                     </div>
                 </div>
                 <div class="summary-card card-winrate" id="card-winrate">
-                    <div class="card-icon"><i class="fas fa-percentage"></i></div>
+                    <div class="card-icon"><i class="fas fa-percentage" aria-hidden="true"></i></div>
                     <div class="card-info">
                         <h3>Win Rate</h3>
                         <p class="card-value" id="val-winrate">--</p>
                     </div>
                 </div>
                 <div class="summary-card card-pnl" id="card-pnl">
-                    <div class="card-icon"><i class="fas fa-dollar-sign"></i></div>
+                    <div class="card-icon"><i class="fas fa-dollar-sign" aria-hidden="true"></i></div>
                     <div class="card-info">
                         <h3>Avg PnL</h3>
                         <p class="card-value" id="val-pnl">--</p>
                     </div>
                 </div>
                 <div class="summary-card card-active" id="card-active">
-                    <div class="card-icon"><i class="fas fa-satellite-dish"></i></div>
+                    <div class="card-icon"><i class="fas fa-satellite-dish" aria-hidden="true"></i></div>
                     <div class="card-info">
                         <h3>Active Now</h3>
                         <p class="card-value" id="val-active">--</p>
@@ -91,11 +92,11 @@
                 </div>
             </div>
 
-            <!-- Active Signals + Deadline Warning -->
+            <!-- Active Signals -->
             <div class="dashboard-row">
                 <section class="panel panel-active-signals">
                     <div class="panel-header">
-                        <h2><i class="fas fa-satellite-dish"></i> Active Signals</h2>
+                        <h2><i class="fas fa-satellite-dish" aria-hidden="true"></i> Active Signals</h2>
                         <span class="badge" id="active-count">0</span>
                     </div>
                     <div class="table-container">
@@ -111,7 +112,7 @@
                                     <th>SL</th>
                                     <th>TP</th>
                                     <th>R:R</th>
-                                    <th>Deadline</th>
+                                    <th>Running</th>
                                     <th>Action</th>
                                 </tr>
                             </thead>
@@ -121,29 +122,19 @@
                         </table>
                     </div>
                 </section>
-
-                <section class="panel panel-deadlines">
-                    <div class="panel-header">
-                        <h2><i class="fas fa-hourglass-half"></i> Near Deadline</h2>
-                        <span class="badge badge-warning" id="deadline-count">0</span>
-                    </div>
-                    <div class="deadline-list" id="deadline-list">
-                        <div class="deadline-item loading">Loading...</div>
-                    </div>
-                </section>
             </div>
         </div>
 
         <!-- ===== SIGNALS TAB ===== -->
-        <div class="tab-content" id="tab-signals">
+        <div class="tab-content" id="tab-signals" role="tabpanel" aria-labelledby="nav-signals">
             <section class="panel">
                 <div class="panel-header">
-                    <h2><i class="fas fa-signal"></i> All Signals</h2>
+                    <h2><i class="fas fa-signal" aria-hidden="true"></i> All Signals</h2>
                     <div class="filter-bar">
-                        <select id="filter-symbol" class="cyber-select">
+                        <select id="filter-symbol" class="cyber-select" aria-label="Filter by symbol">
                             <option value="">All Symbols</option>
                         </select>
-                        <select id="filter-status" class="cyber-select">
+                        <select id="filter-status" class="cyber-select" aria-label="Filter by status">
                             <option value="">All Status</option>
                             <option value="ACTIVE">Active</option>
                             <option value="CLOSED_WIN">Win</option>
@@ -151,15 +142,15 @@
                             <option value="EXPIRED">Expired</option>
                             <option value="CANCELLED">Cancelled</option>
                         </select>
-                        <select id="filter-type" class="cyber-select">
+                        <select id="filter-type" class="cyber-select" aria-label="Filter by signal type">
                             <option value="">All Types</option>
                             <option value="STRONG_LONG">Strong Long</option>
                             <option value="LONG">Long</option>
                             <option value="STRONG_SHORT">Strong Short</option>
                             <option value="SHORT">Short</option>
                         </select>
-                        <button class="cyber-btn" onclick="App.signals.applyFilters()">
-                            <i class="fas fa-filter"></i> Filter
+                        <button class="cyber-btn" onclick="App.signals.applyFilters()" aria-label="Apply filters">
+                            <i class="fas fa-filter" aria-hidden="true"></i> Filter
                         </button>
                     </div>
                 </div>
@@ -190,11 +181,11 @@
         </div>
 
         <!-- ===== ANALYTICS TAB ===== -->
-        <div class="tab-content" id="tab-analytics">
+        <div class="tab-content" id="tab-analytics" role="tabpanel" aria-labelledby="nav-analytics">
             <div class="analytics-grid">
                 <section class="panel panel-chart">
                     <div class="panel-header">
-                        <h2><i class="fas fa-chart-line"></i> Daily Performance</h2>
+                        <h2><i class="fas fa-chart-line" aria-hidden="true"></i> Daily Performance</h2>
                     </div>
                     <div class="chart-wrapper">
                         <canvas id="chart-daily"></canvas>
@@ -203,7 +194,7 @@
 
                 <section class="panel panel-chart">
                     <div class="panel-header">
-                        <h2><i class="fas fa-chart-pie"></i> Win/Loss Distribution</h2>
+                        <h2><i class="fas fa-chart-pie" aria-hidden="true"></i> Win/Loss Distribution</h2>
                     </div>
                     <div class="chart-wrapper chart-small">
                         <canvas id="chart-winloss"></canvas>
@@ -212,7 +203,7 @@
 
                 <section class="panel">
                     <div class="panel-header">
-                        <h2><i class="fas fa-stopwatch"></i> Hold Duration Stats</h2>
+                        <h2><i class="fas fa-stopwatch" aria-hidden="true"></i> Hold Duration Stats</h2>
                     </div>
                     <div class="table-container">
                         <table class="cyber-table" id="hold-duration-table">
@@ -235,7 +226,7 @@
 
                 <section class="panel">
                     <div class="panel-header">
-                        <h2><i class="fas fa-chart-bar"></i> Performance by Symbol</h2>
+                        <h2><i class="fas fa-chart-bar" aria-hidden="true"></i> Performance by Symbol</h2>
                     </div>
                     <div class="chart-wrapper chart-small">
                         <canvas id="chart-symbol"></canvas>
@@ -245,18 +236,18 @@
         </div>
 
         <!-- ===== HISTORY TAB ===== -->
-        <div class="tab-content" id="tab-history">
+        <div class="tab-content" id="tab-history" role="tabpanel" aria-labelledby="nav-history">
             <section class="panel">
                 <div class="panel-header">
-                    <h2><i class="fas fa-history"></i> Closed Signals</h2>
+                    <h2><i class="fas fa-history" aria-hidden="true"></i> Closed Signals</h2>
                     <div class="filter-bar">
-                        <select id="history-status" class="cyber-select">
+                        <select id="history-status" class="cyber-select" aria-label="Filter by status">
                             <option value="CLOSED_WIN">Wins</option>
                             <option value="CLOSED_LOSS">Losses</option>
                             <option value="EXPIRED">Expired</option>
                         </select>
-                        <button class="cyber-btn" onclick="App.history.load()">
-                            <i class="fas fa-search"></i> Load
+                        <button class="cyber-btn" onclick="App.history.load()" aria-label="Load history">
+                            <i class="fas fa-search" aria-hidden="true"></i> Load
                         </button>
                     </div>
                 </div>
@@ -284,14 +275,14 @@
             </section>
         </div>
 
-    </div>
+    </main>
 
     <!-- Signal Detail Modal -->
-    <div class="modal-overlay" id="signal-modal">
+    <div class="modal-overlay" id="signal-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
         <div class="modal-content">
             <div class="modal-header">
-                <h2><i class="fas fa-info-circle"></i> Signal Detail</h2>
-                <button class="modal-close" onclick="App.modal.close()">&times;</button>
+                <h2 id="modal-title"><i class="fas fa-info-circle" aria-hidden="true"></i> Signal Detail</h2>
+                <button class="modal-close" onclick="App.modal.close()" aria-label="Close modal">&times;</button>
             </div>
             <div class="modal-body" id="modal-body">
                 <!-- Populated by JS -->
@@ -300,7 +291,7 @@
     </div>
 
     <!-- Toast Notifications -->
-    <div class="toast-container" id="toast-container"></div>
+    <div class="toast-container" id="toast-container" role="status" aria-live="polite"></div>
 
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>

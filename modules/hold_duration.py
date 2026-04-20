@@ -6,6 +6,7 @@ berdasarkan kondisi market saat sinyal dikunci.
 
 Formula:
   hold_hours = BASE_HOURS × atr_factor × score_factor × volume_factor
+  hold_hours = max(hold_hours, min_hold_tp_based)   ← FIX: TP-distance-aware minimum
   hold_hours = clamp(hold_hours, MIN_HOLD_HOURS, MAX_HOLD_HOURS)
 """
 from typing import Dict, Tuple
@@ -21,6 +22,10 @@ class HoldDurationCalculator:
         self.max_hold_hours = getattr(config, 'MAX_HOLD_HOURS', 12)
         self.extension_ratio = getattr(config, 'EXTENSION_RATIO', 0.5)
         self.max_extensions = getattr(config, 'MAX_EXTENSIONS', 1)
+        # ATR period in hours (config.ATR_PERIOD candles × each candle = 1h)
+        self.atr_period_hours = 1  # ATR_TIMEFRAME = '1h' → 1 candle = 1 hour
+        # TP multiplier must match config.TP_MULTIPLIER
+        self.tp_multiplier = getattr(config, 'TP_MULTIPLIER', 2.5)
 
     def calculate(
         self,
@@ -65,6 +70,17 @@ class HoldDurationCalculator:
             * score_factor
             * volume_factor
         )
+
+        # ── FIX: Minimum hold berdasarkan jarak TP ──────────────────────────────
+        # TP distance = TP_MULTIPLIER × ATR
+        # Waktu untuk menempuh TP ≈ TP_distance / ATR_per_candle
+        # Karena ATR_PERIOD candles × ATR_TIMEFRAME (1h) = TP_MULTIPLIER candles × 1h
+        # Maka: min_hold_tp = TP_MULTIPLIER × ATR_PERIOD × 1.5 (safety buffer 1.5x)
+        # Ini memastikan hold cukup lama untuk price bergerak sepanjang TP distance
+        min_hold_tp = self.tp_multiplier * self.atr_period_hours * 1.5
+
+        # Hold hours harus >= min_hold_tp agar TP reachable dalam periode hold
+        hold_hours = max(hold_hours, min_hold_tp)
 
         # Clamp ke min/max
         hold_hours = max(self.min_hold_hours, min(self.max_hold_hours, hold_hours))

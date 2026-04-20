@@ -235,7 +235,31 @@ class Database:
         except Exception as e:
             logger.error(f"Error updating signal {signal_id}: {e}")
             raise
-    
+
+    async def update_signal_price_range(
+        self,
+        signal_id: int,
+        highest_price: float,
+        lowest_price: float
+    ):
+        """
+        Update running highest/lowest price for a signal.
+        Called on every price check to track if TP or SL was ever hit.
+        """
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    '''
+                    UPDATE signals
+                    SET highest_price = GREATEST(COALESCE(highest_price, 0), $1),
+                        lowest_price  = LEAST(COALESCE(lowest_price, 999999999), $2)
+                    WHERE id = $3
+                    ''',
+                    highest_price, lowest_price, signal_id
+                )
+        except Exception as e:
+            logger.debug(f"Error updating price range for {signal_id}: {e}")
+
     async def get_recent_signals(self, symbol: Optional[str] = None, 
                                limit: int = 50) -> List[Dict]:
         """

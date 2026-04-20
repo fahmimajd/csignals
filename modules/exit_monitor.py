@@ -196,29 +196,32 @@ class ExitMonitor:
             logger.debug(f"[EXIT] Price not yet available for {symbol}, skipping this cycle")
             return
 
+        # ── TRACK: Update running highest/lowest price for retroactive TP/SL check ──
+        await self.db.update_signal_price_range(signal_id, current_price, current_price)
+
         # ── Cek Take Profit ──
         if is_long and current_price >= take_profit:
             pnl = (current_price - entry) / entry * 100
-            await self._close_signal(signal_id, 'CLOSED_WIN', current_price, pnl, symbol)
+            await self._close_signal(signal_id, 'CLOSED_WIN', take_profit, pnl, symbol)
             logger.info(f"[EXIT] ✅ {symbol} HIT_TP id={signal_id}: +{pnl:.2f}%")
             return
 
         if not is_long and current_price <= take_profit:
             pnl = (entry - current_price) / entry * 100
-            await self._close_signal(signal_id, 'CLOSED_WIN', current_price, pnl, symbol)
+            await self._close_signal(signal_id, 'CLOSED_WIN', take_profit, pnl, symbol)
             logger.info(f"[EXIT] ✅ {symbol} HIT_TP id={signal_id}: +{pnl:.2f}%")
             return
 
         # ── Cek Stop Loss ──
         if is_long and stop_loss > 0 and current_price <= stop_loss:
             pnl = (current_price - entry) / entry * 100
-            await self._close_signal(signal_id, 'CLOSED_LOSS', current_price, pnl, symbol)
+            await self._close_signal(signal_id, 'CLOSED_LOSS', stop_loss, pnl, symbol)
             logger.info(f"[EXIT] ❌ {symbol} HIT_SL id={signal_id}: {pnl:.2f}%")
             return
 
         if not is_long and stop_loss > 0 and current_price >= stop_loss:
             pnl = (entry - current_price) / entry * 100
-            await self._close_signal(signal_id, 'CLOSED_LOSS', current_price, pnl, symbol)
+            await self._close_signal(signal_id, 'CLOSED_LOSS', stop_loss, pnl, symbol)
             logger.info(f"[EXIT] ❌ {symbol} HIT_SL id={signal_id}: {pnl:.2f}%")
             return
 
@@ -310,15 +313,64 @@ class ExitMonitor:
             logger.warning(f"[EXIT] Telegram notification failed: {e}")
 
     async def _handle_deadline(self, signal: dict, current_price: float):
-        """Tangani sinyal yang melewati deadline — extend atau expire."""
+        """
+        Tangani sinyal yang melewati deadline — extend atau expire.
+
+        FIX: Retroactive TP/SL check — jika highest/lowest price pernah menyentuh
+        TP atau SL selama periode hold, закрываем di level tersebut sebagai WIN/LOSS,
+        bukan sebagai EXPIRED dengan current_price.
+        """
         signal_id = signal['id']
         symbol = signal['symbol']
         extended = signal.get('extended', False)
         entry = float(signal['entry_price'])
         signal_type = signal.get('signal_type', '')
+        stop_loss = float(signal.get('stop_loss', 0))
+        take_profit = float(signal.get('take_profit', 0))
         is_long = 'LONG' in signal_type
 
-        # Cek apakah bisa diperpanjang (max 1x)
+        # ── Retroactive TP/SL check: pernahkah harga menyentuh TP atau SL? ──
+        # highest_price/lowest_price di-track setiap 60 detik oleh _check_signal
+        highest = float(signal.get('highest_price', 0) or 0)
+        lowest = float(signal.get('lowest_price', 0) or 0)
+
+        tp_hit = False
+        sl_hit = False
+
+        if is_long:
+            # LONG: TP = take_profit (atas), SL = stop_loss (bawah)
+            if highest > 0 and highest >= take_profit:
+                tp_hit = True
+            if sl_hit > 0 and lowest > 0 and lowest <= stop_loss:
+                sl_hit = True
+        else:
+            # SHORT: TP = take_profit (bawah), SL = stop_loss (atas)
+            if lowest > 0 and lowest <= take_profit:
+                tp_hit = True
+            if stop_loss > 0 and highest > 0 and highest >= stop_loss:
+                sl_hit = True
+
+        if tp_hit:
+            # TP pernah disentuh — close WIN di level TP
+            pnl = (take_profit - entry) / entry * 100 if is_long else (entry - take_profit) / entry * 100
+            await self._close_signal(signal_id, 'CLOSED_WIN', take_profit, pnl, symbol)
+            logger.info(
+                f"[EXIT] ✅ {symbol} RETROACTIVE HIT_TP id={signal_id}: "
+                f"high={highest:.4f} tp={take_profit:.4f} → +{pnl:.2f}%"
+            )
+            return
+
+        if sl_hit:
+            # SL pernah disentuh — close LOSS di level SL
+            pnl = (stop_loss - entry) / entry * 100 if is_long else (entry - stop_loss) / entry * 100
+            await self._close_signal(signal_id, 'CLOSED_LOSS', stop_loss, pnl, symbol)
+            logger.info(
+                f"[EXIT] ❌ {symbol} RETROACTIVE HIT_SL id={signal_id}: "
+                f"low={lowest:.4f} sl={stop_loss:.4f} → {pnl:.2f}%"
+            )
+            return
+
+        # ── Tidak ada TP/SL yang disentuh — cek apakah bisa extend ──
         can_extend = not extended and await self._check_extension_eligible(signal, current_price)
 
         if can_extend:
@@ -355,13 +407,16 @@ class ExitMonitor:
             except Exception as e:
                 logger.warning(f"[EXIT] Telegram extended notification failed: {e}")
         else:
-            # Expire sinyal
+            # True EXPIRED — TP/SL tidak pernah disentuh dan tidak bisa extend
             pnl = ((current_price - entry) / entry * 100
                    if is_long
                    else (entry - current_price) / entry * 100)
 
             await self._close_signal(signal_id, 'EXPIRED', current_price, pnl, symbol)
-            logger.info(f"[EXIT] ⌛ {symbol} EXPIRED id={signal_id} PnL: {pnl:.2f}%")
+            logger.info(
+                f"[EXIT] ⌛ {symbol} TRUE EXPIRED id={signal_id} "
+                f"(high={highest:.4f} low={lowest:.4f}) PnL: {pnl:.2f}%"
+            )
 
     async def _check_extension_eligible(self, signal: dict, current_price: float) -> bool:
         """Cek syarat perpanjangan: score masih STRONG + trailing aktif."""
