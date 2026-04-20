@@ -94,7 +94,11 @@ class Database:
                     mc_prob_tp DECIMAL(5,1),
                     mc_prob_sl DECIMAL(5,1),
                     mc_prob_expire DECIMAL(5,1),
-                    mc_confidence VARCHAR(10)
+                    mc_confidence VARCHAR(10),
+                    
+                    -- Price range tracking for retroactive TP/SL check
+                    highest_price DECIMAL(20, 8),
+                    lowest_price DECIMAL(20, 8)
                 )
             ''')
             
@@ -656,6 +660,9 @@ class Database:
             ('extension_hours', 'DECIMAL(6,2)'),
             ('expired_price', 'DECIMAL(20,8)'),
             ('expired_pnl_pct', 'DECIMAL(8,4)'),
+            # Price range tracking for retroactive TP/SL check
+            ('highest_price', 'DECIMAL(20,8)'),
+            ('lowest_price', 'DECIMAL(20,8)'),
         ]
         async with self.pool.acquire() as conn:
             for col_name, col_type in columns:
