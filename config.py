@@ -67,3 +67,12 @@ LOG_FILE = "logs/signals.log"
 MC_N_SIMULATIONS = 1000  # Number of simulation runs
 MC_MIN_PROB_TP = 40.0    # Minimum TP probability (%) to not skip signal
 MC_HIGH_CONF = 65.0      # TP probability (%) for HIGH confidence
+
+# Technical Indicators (RSI, MACD, Stochastic)
+USE_TECHNICAL_INDICATORS = False  # Set to True to enable RSI/MACD/Stochastic confirmation
+TECH_RSI_PERIOD = 14
+TECH_MACD_FAST = 12
+TECH_MACD_SLOW = 26
+TECH_MACD_SIGNAL = 9
+TECH_STOCH_K = 14
+TECH_STOCH_D = 3

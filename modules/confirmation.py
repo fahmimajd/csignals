@@ -14,6 +14,9 @@ Changes in this refactor:
 
 4. Signal type propagation — main.py now passes (symbol, score, signal_type, price)
    so direction-flip detection works correctly for the sync path too.
+
+5. Technical indicator integration — RSI, MACD, Stochastic confirmation layer.
+   Added optional technical indicator confirmation before final signal approval.
 """
 
 import asyncio
@@ -25,6 +28,18 @@ from typing import Dict, Optional, Tuple
 import config
 
 logger = logging.getLogger(__name__)
+
+# Lazy import of technical indicators
+_technical_indicators = None
+
+
+def _get_technical_indicators():
+    """Lazy import to avoid circular dependencies."""
+    global _technical_indicators
+    if _technical_indicators is None:
+        from modules.technical_indicators import TechnicalIndicators
+        _technical_indicators = TechnicalIndicators()
+    return _technical_indicators
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -369,6 +384,16 @@ class SignalConfirmation:
         if not confirmed:
             return None
 
+        # ── Technical Indicator Confirmation Layer ───────────────────────
+        # Optional: Check RSI, MACD, Stochastic for additional confirmation
+        tech_confirm = await self._check_technical_indicators(symbol, signal_type)
+        
+        if not tech_confirm:
+            logger.info(
+                f"[{symbol}] Async signal blocked by technical indicators"
+            )
+            return None
+
         # ── CONFIRMED ─────────────────────────────────────────────────
         self._set_cooldown(symbol)
         self._recent_signals[key] = now
@@ -428,3 +453,64 @@ class SignalConfirmation:
             return 1.0
         elapsed = (time.time() - state.first_strong_time) / 60
         return min(elapsed / config.CONFIRMATION_MINUTES, 1.0)
+
+    # ─────────────────────────────────────────────────────────────────────
+    # TECHNICAL INDICATOR CONFIRMATION
+    # ─────────────────────────────────────────────────────────────────────
+
+    async def _check_technical_indicators(
+        self, symbol: str, signal_type: str
+    ) -> bool:
+        """
+        Check technical indicators for additional confirmation.
+        
+        This is an optional layer that can be enabled/disabled via config.
+        When enabled, signals must pass RSI, MACD, and Stochastic checks.
+        
+        Args:
+            symbol: Trading pair
+            signal_type: "STRONG_LONG" or "STRONG_SHORT"
+            
+        Returns:
+            True if indicators confirm the signal (or if feature is disabled)
+            False if indicators contradict the signal
+        """
+        # Check if technical indicator confirmation is enabled
+        if not getattr(config, 'USE_TECHNICAL_INDICATORS', False):
+            return True  # Skip check if disabled
+        
+        try:
+            tech = _get_technical_indicators()
+            confirmation = await tech.get_confirmation(symbol, signal_type)
+            
+            # Log indicator values for debugging
+            logger.debug(
+                f"[{symbol}] Tech Indicators: RSI={confirmation.rsi_signal}, "
+                f"MACD={confirmation.macd_signal}, Stoch={confirmation.stoch_signal}, "
+                f"Bias={confirmation.overall_bias}, Conf={confirmation.confidence:.2f}"
+            )
+            
+            # Require at least neutral or better bias
+            # Reject only if indicators strongly contradict
+            if confirmation.overall_bias == "NEUTRAL":
+                return True  # Allow neutral
+            
+            # For LONG signals, reject if bearish bias with high confidence
+            if signal_type == "STRONG_LONG":
+                if confirmation.overall_bias == "BEARISH" and confirmation.confidence > 0.5:
+                    return False
+            
+            # For SHORT signals, reject if bullish bias with high confidence
+            elif signal_type == "STRONG_SHORT":
+                if confirmation.overall_bias == "BULLISH" and confirmation.confidence > 0.5:
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            logger.warning(
+                f"[{symbol}] Technical indicator check failed: {e}. "
+                "Allowing signal to proceed."
+            )
+            # On error, allow signal to proceed (fail-safe)
+            return True
