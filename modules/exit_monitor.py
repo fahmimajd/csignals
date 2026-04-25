@@ -360,7 +360,7 @@ class ExitMonitor:
             # LONG: TP = take_profit (atas), SL = stop_loss (bawah)
             if highest > 0 and highest >= take_profit:
                 tp_hit = True
-            if sl_hit > 0 and lowest > 0 and lowest <= stop_loss:
+            if lowest > 0 and lowest <= stop_loss:
                 sl_hit = True
         else:
             # SHORT: TP = take_profit (bawah), SL = stop_loss (atas)
@@ -448,7 +448,7 @@ class ExitMonitor:
             return False
 
         # Syarat 2: Score masih STRONG (>= 4)
-        current_score = self.aggregator.get_raw_score(symbol)
+        current_score = await self.aggregator.get_raw_score(symbol)
         abs_score = abs(current_score)
         if abs_score < 4:
             logger.debug(f"[EXIT] {symbol}: score lemah ({current_score}), tidak extend")
