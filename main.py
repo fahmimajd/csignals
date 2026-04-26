@@ -184,7 +184,7 @@ class CryptoSignalApp:
 
                         # Check confirmation status
                         is_confirmed, confirmed_signal, confirmed_score = \
-                            self.confirmation.update(symbol, raw_score)
+                            await self.confirmation.update(symbol, raw_score)
 
                         signals[symbol]['is_confirmed'] = is_confirmed
                         signals[symbol]['confirmed_signal'] = confirmed_signal
@@ -519,6 +519,12 @@ class CryptoSignalApp:
 
         # Calculate trailing stop levels
         trail_trigger, trail_stop = tp_sl.get_trail_levels(symbol, price, side, price)
+        trail_distance = atr * config.TRAIL_DISTANCE_ATR
+
+        # If trailing not yet activated, show PENDING stop level (entry ± ATR distance)
+        # so user can see where the stop would be set once trailing activates
+        if trail_stop is None and atr > 0:
+            trail_stop = price - trail_distance if side == 'LONG' else price + trail_distance
 
         return {
             'entry_zone': f"{price*0.999:,.0f} - {price*1.001:,.0f}",

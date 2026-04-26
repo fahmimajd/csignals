@@ -240,7 +240,7 @@ class ExitMonitor:
         if not is_long and stop_loss > 0 and current_price >= stop_loss:
             pnl = (entry - current_price) / entry * 100
             exit_type = 'CLOSED_LOSS_TRAILING' if trailing_stop else 'CLOSED_LOSS'
-            await self._close_signal(signal_id, exit_type, stop_loss, pnl, symbol)
+            await self._close_signal(signal_id, exit_type, current_price, pnl, symbol)
             logger.info(f"[EXIT] ❌ {symbol} HIT_SL id={signal_id}: {pnl:.2f}% {'(trailing)' if trailing_stop else ''}")
             return
 
@@ -265,7 +265,7 @@ class ExitMonitor:
         if 0 < time_remaining < 1800:  # < 30 menit sebelum deadline
             pnl = ((current_price - entry) / entry * 100
                    if is_long
-                   else (entry - current_price) / entry * 100)
+                   else (current_price - entry) / entry * 100)
             if pnl > 0.5:  # Minimal 0.5% profit
                 await self._close_signal(signal_id, 'CLOSED_WIN', current_price, pnl, symbol)
                 logger.info(
@@ -360,13 +360,16 @@ class ExitMonitor:
             # LONG: TP = take_profit (atas), SL = stop_loss (bawah)
             if highest > 0 and highest >= take_profit:
                 tp_hit = True
-            if lowest > 0 and lowest <= stop_loss:
+            # Only trigger retroactive SL if price actually moved below entry
+            # (lowest < entry proves there was adverse movement, not just initial price)
+            if lowest > 0 and lowest < entry and lowest <= stop_loss:
                 sl_hit = True
         else:
             # SHORT: TP = take_profit (bawah), SL = stop_loss (atas)
             if lowest > 0 and lowest <= take_profit:
                 tp_hit = True
-            if stop_loss > 0 and highest > 0 and highest >= stop_loss:
+            # Only trigger retroactive SL if price actually moved above entry
+            if stop_loss > 0 and highest > 0 and highest > entry and highest >= stop_loss:
                 sl_hit = True
 
         if tp_hit:
@@ -429,7 +432,7 @@ class ExitMonitor:
             # True EXPIRED — TP/SL tidak pernah disentuh dan tidak bisa extend
             pnl = ((current_price - entry) / entry * 100
                    if is_long
-                   else (entry - current_price) / entry * 100)
+                   else (current_price - entry) / entry * 100)
 
             await self._close_signal(signal_id, 'EXPIRED', current_price, pnl, symbol)
             logger.info(

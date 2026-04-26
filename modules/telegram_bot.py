@@ -237,16 +237,18 @@ class TelegramNotifier:
             tp_percent = tp_sl_info.get('tp_percent', 0) or 0
             trail_start = tp_sl_info.get('trail_start', 0) or 0
             trail_stop = tp_sl_info.get('trail_stop', 0) or 0
+            trail_active = tp_sl_info.get('trail_stop_active', False)
             rr_ratio = tp_sl_info.get('rr_ratio', 'N/A')
             atr = tp_sl_info.get('atr', 0) or 0
-            
+
             # Format prices with proper thousand separators and decimal precision
             # Use locale-aware formatting or manual formatting for consistency
             lines.append(f"Entry Zone  : {entry_zone}")
             lines.append(f"Stop Loss   : ${stop_loss:,.4f} ({sl_percent:.2f}%)")
             lines.append(f"TP Target   : ${take_profit:,.4f} ({tp_percent:.2f}%)")
             lines.append(f"Trail Start : ${trail_start:,.4f}")
-            lines.append(f"Trail Stop  : ${trail_stop:,.4f}")
+            ts_label = "(Active)" if trail_active else "(Pending)"
+            lines.append(f"Trail Stop  : ${trail_stop:,.4f} {ts_label}")
             lines.append(f"R:R Ratio   : {rr_ratio}")
             lines.append(f"ATR (14,1H) : {atr:,.4f}")
             

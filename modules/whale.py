@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 # 3 streams per socket = 5 batches for 15 symbols (manageable message rate).
 STREAMS_PER_SOCKET = 3
 
-
 # Tiered whale thresholds — smaller-cap assets have lower minimums
 # to ensure the whale component fires more often across altcoins.
 WHALE_TIERS = {
@@ -39,7 +38,6 @@ class WhaleTradeMonitor(Monitor):
         super().__init__()
         self.whale_trades: Dict[str, List[Tuple[float, str, float, datetime]]] = {}
         self.window = timedelta(minutes=10)  # Analysis window
-        # No single hardcoded threshold — use get_threshold(symbol) instead
 
     def get_threshold(self, symbol: str) -> float:
         """Return the whale detection threshold for a given symbol based on its tier."""
@@ -82,7 +80,6 @@ class WhaleTradeMonitor(Monitor):
 
         while self.running:
             try:
-                # Ensure client/socket_manager are alive before connecting
                 await self._ensure_client_alive()
                 cm = self.get_client_manager()
 
@@ -101,9 +98,9 @@ class WhaleTradeMonitor(Monitor):
                                 await self._process_trade(msg['data'])
 
                         except BinanceWebsocketQueueOverflow:
-                            # Queue overflow from ws.recv() — break inner loop to reconnect
+                            # Queue overflow from recv() — break to reconnect
                             logger.warning(
-                                f"Whale batch WebSocket queue overflow (from recv), reconnecting..."
+                                f"Whale batch WebSocket queue overflow (recv), reconnecting..."
                             )
                             break
 
@@ -112,7 +109,7 @@ class WhaleTradeMonitor(Monitor):
                             logger.debug(
                                 f"Whale batch WebSocket timeout, reconnecting..."
                             )
-                            break  # Exit inner loop to reconnect
+                            break
 
                         except BinanceWebsocketUnableToConnect:
                             logger.warning(
@@ -124,10 +121,9 @@ class WhaleTradeMonitor(Monitor):
                 break
 
             except BinanceWebsocketQueueOverflow:
-                # Queue overflow from ws.recv() or __aenter__ — break inner loop to reconnect
-                # Self-correcting: reset attempt so we don't count it against MAX_CONSECUTIVE_ERRORS
+                # Queue overflow from __aenter__ (socket creation) — break to reconnect
                 logger.warning(
-                    f"Whale batch WebSocket queue overflow (outer), reconnecting..."
+                    f"Whale batch WebSocket queue overflow (create), reconnecting..."
                 )
                 break
 
@@ -183,7 +179,6 @@ class WhaleTradeMonitor(Monitor):
         if symbol not in self.whale_trades:
             self.whale_trades[symbol] = []
         self.whale_trades[symbol].append((notional, side, price, timestamp))
-
         self._clean_old_trades(symbol)
 
     def _clean_old_trades(self, symbol: str):
@@ -191,15 +186,15 @@ class WhaleTradeMonitor(Monitor):
         if symbol not in self.whale_trades:
             return
         cutoff = datetime.now() - self.window
-        self.whale_trades[symbol] = [trade for trade in self.whale_trades[symbol] if trade[3] > cutoff]
+        self.whale_trades[symbol] = [
+            trade for trade in self.whale_trades[symbol] if trade[3] > cutoff
+        ]
 
     def get_dominance(self, symbol: str) -> Tuple[int, int, str]:
         """
         Return count of buyer vs seller whales and dominance signal.
-
-        Returns:
-            Tuple of (buyer_count, seller_count, dominance)
-            dominance: 'BUYER_DOMINANCE', 'SELLER_DOMINANCE', or 'NEUTRAL'
+        Returns: (buyer_count, seller_count, dominance)
+        dominance: 'BUYER_DOMINANCE', 'SELLER_DOMINANCE', or 'NEUTRAL'
         """
         if symbol not in self.whale_trades or not self.whale_trades[symbol]:
             return 0, 0, 'NEUTRAL'
@@ -220,20 +215,19 @@ class WhaleTradeMonitor(Monitor):
         """Get recent whale trades for display."""
         if symbol not in self.whale_trades or not self.whale_trades[symbol]:
             return []
-        recent = sorted(self.whale_trades[symbol], key=lambda x: x[3], reverse=True)[:limit]
-        return [{
-            'notional': trade[0],
-            'side': trade[1],
-            'price': trade[2],
-            'time': trade[3].strftime('%H:%M:%S')
-        } for trade in recent]
+        recent = sorted(
+            self.whale_trades[symbol], key=lambda x: x[3], reverse=True
+        )[:limit]
+        return [
+            {'notional': t[0], 'side': t[1], 'price': t[2], 'time': t[3].strftime('%H:%M:%S')}
+            for t in recent
+        ]
 
     def check_alert(self, symbol: str) -> bool:
         """Check if 3+ whale trades in same direction within window."""
         if symbol not in self.whale_trades or not self.whale_trades[symbol]:
             return False
 
-        buyers = [trade for trade in self.whale_trades[symbol] if trade[1] == 'BUYER']
-        sellers = [trade for trade in self.whale_trades[symbol] if trade[1] == 'SELLER']
-
+        buyers = [t for t in self.whale_trades[symbol] if t[1] == 'BUYER']
+        sellers = [t for t in self.whale_trades[symbol] if t[1] == 'SELLER']
         return len(buyers) >= 3 or len(sellers) >= 3

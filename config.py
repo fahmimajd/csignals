@@ -69,7 +69,7 @@ MC_MIN_PROB_TP = 40.0    # Minimum TP probability (%) to not skip signal
 MC_HIGH_CONF = 65.0      # TP probability (%) for HIGH confidence
 
 # Technical Indicators (RSI, MACD, Stochastic)
-USE_TECHNICAL_INDICATORS = False  # Set to True to enable RSI/MACD/Stochastic confirmation
+USE_TECHNICAL_INDICATORS = True   # Set to True to enable RSI/MACD/Stochastic confirmation
 TECH_RSI_PERIOD = 14
 TECH_MACD_FAST = 12
 TECH_MACD_SLOW = 26
